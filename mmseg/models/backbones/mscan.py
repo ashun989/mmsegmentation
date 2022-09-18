@@ -1,12 +1,16 @@
+import torch
 import torch.nn as nn
 import warnings
 
 from ..builder import BACKBONES
-from ..utils import PatchEmbed
+from ..utils import AdaptivePadding
 from mmcv.runner import ModuleList
 from torch.nn.modules.utils import _pair as to_2tuple
 from mmcv.cnn import ConvModule
-from mmcv.cnn import Conv2d, build_activation_layer, build_norm_layer
+from mmcv.cnn import (Conv2d, build_activation_layer, build_norm_layer)
+import torch.utils.checkpoint as cp
+from mmcv.cnn.utils.weight_init import (constant_init, kaiming_init)
+from torch.nn.modules.batchnorm import _BatchNorm
 
 
 class FFN(nn.Module):
@@ -37,21 +41,65 @@ class FFN(nn.Module):
         )
         self.act = build_activation_layer(act_cfg)
 
-    def forward(self, x, identity=None):
+    def forward(self, x):
         out = self.proj1(x)
         out = self.dconv(out)
         out = self.act(out)
-        if identity is None:
-            identity = x
-        return self.proj2(out) + identity
+        return self.proj2(out)
 
 
 class MSCA(nn.Module):
-    def __init__(self):
+    def __init__(self,
+                 num_channel,
+                 k1_size=5,
+                 k_sizes=(7, 11, 21)):
         super(MSCA, self).__init__()
+        self.adap_pad1 = AdaptivePadding(
+            kernel_size=k1_size,
+            stride=1,
+        )
+        self.conv1 = Conv2d(
+            in_channels=num_channel,
+            out_channels=num_channel,
+            kernel_size=k1_size,
+            stride=1,
+            padding=0,
+            groups=num_channel
+        )
+        self.sd_adap_pads = []
+        self.sd_convs = []
+        for k_size in k_sizes:
+            self.sd_adap_pads.append(AdaptivePadding(kernel_size=k_size, stride=1))
+            self.sd_convs.append(Conv2d(
+                in_channels=num_channel, out_channels=num_channel,
+                kernel_size=(1, k_size), stride=1, padding=0,
+                groups=num_channel
+            ))
+            self.sd_convs.append(Conv2d(
+                in_channels=num_channel, out_channels=num_channel,
+                kernel_size=(k_size, 1), stride=1, padding=0,
+                groups=num_channel
+            ))
+        self.channel_mix = Conv2d(
+            in_channels=num_channel,
+            out_channels=num_channel,
+            kernel_size=1,
+            stride=1,
+            padding=0
+        )
+        self.skip_connection1 = nn.Identity()
+        self.skip_connection2 = nn.Identity()
 
-    def forward(self, x, identity=None):
-        pass
+    def forward(self, x):
+        x0 = self.skip_connection1(x)
+        x = self.conv1(self.adap_pad1(x))
+        attn = self.skip_connection2(x)
+        for i in range(len(self.sd_adap_pads)):
+            xi = self.sd_adap_pads[i](x)
+            xi = self.sd_convs[2 * i](self.sd_convs[2 * i + 1](xi))
+            attn += xi
+        attn = self.channel_mix(attn)
+        return torch.multiply(attn, x0)
 
 
 class MultiScaleConvAttnModule(nn.Module):
@@ -64,7 +112,11 @@ class MultiScaleConvAttnModule(nn.Module):
                  ):
         super(MultiScaleConvAttnModule, self).__init__()
 
-        self.attn = MSCA()
+        self.norm1 = build_norm_layer(norm_cfg, num_channel)[1]
+        self.attn = MSCA(
+            num_channel=num_channel
+        )
+        self.norm2 = build_norm_layer(norm_cfg, num_channel)[1]
         self.ffn = FFN(
             num_channel=num_channel,
             hidden_channel=hidden_channel,
@@ -72,7 +124,14 @@ class MultiScaleConvAttnModule(nn.Module):
         )
 
     def forward(self, x):
-        pass
+        identity = x
+        x = self.norm1(x)
+        x = self.attn(x)
+        x = identity + x
+        identity = x
+        x = self.norm2(x)
+        x = self.ffn(x)
+        return identity + x
 
 
 @BACKBONES.register_module()
@@ -83,7 +142,6 @@ class MSCAN(nn.Module):
 
     def __init__(self,
                  in_channels=3,
-                 img_size=224,
                  num_channels=[32, 64, 160, 256],
                  num_blocks=[3, 3, 5, 2],
                  exp_ratios=[8, 8, 4, 4],
@@ -107,16 +165,6 @@ class MSCAN(nn.Module):
 
         assert len(num_channels) == len(num_blocks) == len(exp_ratios)
 
-        if isinstance(img_size, int):
-            img_size = to_2tuple(img_size)
-        elif isinstance(img_size, tuple):
-            if len(img_size) == 1:
-                img_size = to_2tuple(img_size[0])
-            assert len(img_size) == 2, \
-                f'The size of image should have length 1 or 2, ' \
-                f'but got {len(img_size)}'
-
-        self.img_size = img_size
         self.num_channels = num_channels
         self.num_blocks = num_blocks
         self.exp_rations = exp_ratios
@@ -168,7 +216,22 @@ class MSCAN(nn.Module):
             self.layers.append(ModuleList[layer, downsample, norm])
 
     def forward(self, x):
-        pass
+        def _inner_forward(x):
+            x = self.embedding(x)
+            x = self.layers(x)
+            return x
+
+        if self.with_cp and x.requires_grad:
+            x = cp.checkpoint(_inner_forward, x)
+        else:
+            x = _inner_forward(x)
+        return x
 
     def init_weights(self, pretrained=None):
-        pass
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                kaiming_init(m, mode='fan_in', bias=0.)
+            elif isinstance(m, (_BatchNorm , nn.GroupNorm, nn.LayerNorm)):
+                constant_init(m, val=1.0, bias=0.)
+
+
