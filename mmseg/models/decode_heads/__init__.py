@@ -15,7 +15,7 @@ from .gc_head import GCHead
 from .isa_head import ISAHead
 from .knet_head import IterativeDecodeHead, KernelUpdateHead, KernelUpdator
 from .lraspp_head import LRASPPHead
-from .nl_head import NLHead
+from .nl_head import NLHead, NLHead2
 from .ocr_head import OCRHead
 from .point_head import PointHead
 from .psa_head import PSAHead
@@ -37,5 +37,5 @@ __all__ = [
     'PointHead', 'APCHead', 'DMHead', 'LRASPPHead', 'SETRUPHead',
     'SETRMLAHead', 'DPTHead', 'SETRMLAHead', 'SegmenterMaskTransformerHead',
     'SegformerHead', 'ISAHead', 'STDCHead', 'IterativeDecodeHead',
-    'KernelUpdateHead', 'KernelUpdator', 'HamHead', 'LightHamHead'
+    'KernelUpdateHead', 'KernelUpdator', 'HamHead', 'LightHamHead', 'NLHead2'
 ]
