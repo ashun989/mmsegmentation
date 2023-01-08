@@ -77,16 +77,16 @@ The master branch works with **PyTorch 1.5+**.
 
 ### 💎 Stable version
 
-v0.28.0 was released in 9/08/2022:
+v0.29.1 was released on 11/3/2022:
 
-- Support Tversky Loss
-- Fix binary segmentation
+- Add model ensemble tools
+- Update documents
 
 Please refer to [changelog.md](docs/en/changelog.md) for details and release history.
 
 ### 🌟 Preview of 1.x version
 
-A brand new version of **MMSegmentation v1.0.0rc0** was released in 31/8/2022:
+A brand new version of **MMSegmentation v1.0.0rc1** was released in 02/11/2022:
 
 - Unifies interfaces of all components based on [MMEngine](https://github.com/open-mmlab/mmengine).
 - Faster training and testing speed with complete support of mixed precision training.
@@ -130,6 +130,7 @@ Supported backbones:
 - [x] [BEiT (ICLR'2022)](configs/beit)
 - [x] [ConvNeXt (CVPR'2022)](configs/convnext)
 - [x] [MAE (CVPR'2022)](configs/mae)
+- [x] [PoolFormer (CVPR'2022)](configs/poolformer)
 
 Supported methods:
 
@@ -186,6 +187,7 @@ Supported datasets:
 - [x] [Potsdam](https://github.com/open-mmlab/mmsegmentation/blob/master/docs/en/dataset_prepare.md#isprs-potsdam)
 - [x] [Vaihingen](https://github.com/open-mmlab/mmsegmentation/blob/master/docs/en/dataset_prepare.md#isprs-vaihingen)
 - [x] [iSAID](https://github.com/open-mmlab/mmsegmentation/blob/master/docs/en/dataset_prepare.md#isaid)
+- [x] [High quality synthetic face occlusion](https://github.com/open-mmlab/mmsegmentation/blob/master/docs/en/dataset_prepare.md#delving-into-high-quality-synthetic-face-occlusion-segmentation-datasets)
 
 ## FAQ
 
@@ -226,6 +228,7 @@ MMSegmentation is released under the Apache 2.0 license, while some specific fea
 - [MMClassification](https://github.com/open-mmlab/mmclassification): OpenMMLab image classification toolbox and benchmark.
 - [MMDetection](https://github.com/open-mmlab/mmdetection): OpenMMLab detection toolbox and benchmark.
 - [MMDetection3D](https://github.com/open-mmlab/mmdetection3d): OpenMMLab's next-generation platform for general 3D object detection.
+- [MMYOLO](https://github.com/open-mmlab/mmyolo): OpenMMLab YOLO series toolbox and benchmark.
 - [MMRotate](https://github.com/open-mmlab/mmrotate): OpenMMLab rotated object detection toolbox and benchmark.
 - [MMSegmentation](https://github.com/open-mmlab/mmsegmentation): OpenMMLab semantic segmentation toolbox and benchmark.
 - [MMOCR](https://github.com/open-mmlab/mmocr): OpenMMLab text detection, recognition, and understanding toolbox.
