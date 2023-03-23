@@ -1,4 +1,4 @@
-_base_ = ['./deeplabv3_r50-d8_512x512_40k_diffusemade0_base.py']
+_base_ = ['./deeplabv3_r50-d8_512x512_40k_diffusemade0_base2.py']
 
 
 model = dict(
@@ -11,5 +11,5 @@ model = dict(
 )
 
 data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=2)  # for debug
+    samples_per_gpu=8,
+    workers_per_gpu=4)  # for debug
