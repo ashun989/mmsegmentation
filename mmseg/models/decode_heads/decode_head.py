@@ -304,10 +304,10 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         seg_label_p_1d = torch.zeros_like(seg_logit_1d, device=seg_logit_1d.device)
         all_idx = torch.arange(seg_logit_1d.shape[0], device=seg_logit_1d.device)
         fore_idx = seg_label_1d != 0
-        back_idx = seg_logit_1d == 0
+        # back_idx = seg_logit_1d == 0
         seg_label_p_1d[all_idx, seg_label_1d] = prob_label_1d
         seg_label_p_1d[fore_idx, 0] = 1 - prob_label_1d[fore_idx]
-        seg_label_p_1d[back_idx, seg_label_1d] = 1 - prob_label_1d[back_idx]
+        # seg_label_p_1d[back_idx, seg_label_1d[]] = 1 - prob_label_1d[back_idx]
         return seg_logit_1d, seg_label_p_1d
 
     @force_fp32(apply_to=('seg_logit',))
