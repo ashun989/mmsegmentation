@@ -2,6 +2,7 @@
 import warnings
 from abc import ABCMeta, abstractmethod
 
+import numpy as np
 import torch
 import torch.nn as nn
 from mmcv.runner import BaseModule, auto_fp16, force_fp32
@@ -10,7 +11,6 @@ from mmseg.core import build_pixel_sampler
 from mmseg.ops import resize
 from ..builder import build_loss
 from ..losses import accuracy
-from ..losses import binary_cross_entropy
 
 
 class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
@@ -273,6 +273,21 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         output = self.conv_seg(feat)
         return output
 
+    def get_new_logit_and_prob_label(self, seg_logit, seg_label, prob_label):
+        B, C, H, W = seg_logit.shape
+        useful_idx = seg_label != self.ignore_index
+        useful_idx_1d = useful_idx.reshape(-1)
+        seg_logit_1d = seg_logit.permute(0, 2, 3, 1).reshape(-1, C)[useful_idx_1d]
+        seg_label_1d = seg_label.reshape(-1)[useful_idx_1d]
+        prob_label_1d = prob_label.reshape(-1)[useful_idx_1d]
+
+        seg_label_p_1d = torch.zeros_like(seg_logit_1d, device=seg_logit_1d.device)
+        all_idx = torch.arange(seg_logit_1d.shape[0], device=seg_logit_1d.device)
+        fore_idx = seg_label_1d != 0
+        seg_label_p_1d[all_idx, seg_label_1d] = prob_label_1d
+        seg_label_p_1d[fore_idx, 0] = 1 - prob_label_1d[fore_idx]
+        return seg_logit_1d, seg_label_p_1d
+
     @force_fp32(apply_to=('seg_logit',))
     def losses(self, seg_logit, seg_label):
         """Compute segmentation loss."""
@@ -304,8 +319,9 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             seg_weight = self.sampler.sample(seg_logit, seg_label)
         else:
             seg_weight = None
+
+        seg_label = seg_label.squeeze(1)  # (B, H, W)
         if self.use_prob is None:
-            seg_label = seg_label.squeeze(1)  # (B, H, W)
             if not isinstance(self.loss_decode, nn.ModuleList):
                 losses_decode = [self.loss_decode]
             else:
@@ -324,22 +340,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                         weight=seg_weight,
                         ignore_index=self.ignore_index)
         elif self.use_prob['method'] == 'direct':
-            seg_label_p = torch.zeros_like(seg_logit)  # (B, C, H, W)
-            seg_label_p.scatter_(1, seg_label, prob_label)
-            # seg_label = seg_label_p
-            # when target of cross_entropy means probabilities, cannot use ignore_index
-            is_ignored = (seg_label == self.ignore_index).flatten()
-            B, C, H, W = seg_label_p.shape
-            # for b in range(B):
-            #     for h in range(H):
-            #         for w in range(W):
-            #             if is_ignored[b, 0, h, w]:
-            #                 seg_label_p[b, :, h, w] = seg_logit[b, :, h, w]
-            seg_label_p = seg_label_p.permute(0, 2, 3, 1).reshape(-1, C)
-            seg_logit = seg_logit.permute(0, 2, 3, 1).reshape(-1, C)
-            seg_label_p[is_ignored, torch.arange(C)] = seg_logit[is_ignored, torch.arange(C)]
-            seg_label_p = seg_label_p.reshape(B, H, W, C).permute(0, 3, 1, 2)
-            seg_logit = seg_logit.reshape(B, H, W, C).permute(0, 3, 1, 2)
+            seg_logit2, seg_label_p = self.get_new_logit_and_prob_label(seg_logit, seg_label, prob_label)
             if not isinstance(self.loss_decode, nn.ModuleList):
                 losses_decode = [self.loss_decode]
             else:
@@ -347,16 +348,16 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             for loss_decode in losses_decode:
                 if loss_decode.loss_name not in loss:
                     loss[loss_decode.loss_name] = loss_decode(
-                        seg_logit,
+                        seg_logit2,
                         seg_label_p,
                         weight=seg_weight,
-                        ignore_index=None)
+                        ignore_index=-100)
                 else:
                     loss[loss_decode.loss_name] += loss_decode(
-                        seg_logit,
+                        seg_logit2,
                         seg_label_p,
                         weight=seg_weight,
-                        ignore_index=None)
+                        ignore_index=-100)
 
         # if prob_label is not None and self.use_prob is not None and self.use_prob['method'] == 'saliency':
         #     exit(0)

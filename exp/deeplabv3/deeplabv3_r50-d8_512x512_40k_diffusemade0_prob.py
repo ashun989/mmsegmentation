@@ -9,3 +9,7 @@ model = dict(
         use_prob=dict(method='direct')
     )
 )
+
+data = dict(
+    samples_per_gpu=2,
+    workers_per_gpu=2)  # for debug
