@@ -97,6 +97,13 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         self.with_prob = with_prob
         self.use_prob = use_prob if use_prob else None
 
+        self.new_logit_and_prob_label_getter = None
+        if self.use_prob['method'] == 'one_prob':
+            self.new_logit_and_prob_label_getter = self.get_new_logit_and_one_prob_label
+        elif self.use_prob['method'] == 'two_prob':
+            self.new_logit_and_prob_label_getter = self.get_new_logit_and_two_prob_label
+
+
         self.ignore_index = ignore_index
         self.align_corners = align_corners
         self.downsample_label_ratio = downsample_label_ratio
@@ -273,7 +280,20 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         output = self.conv_seg(feat)
         return output
 
-    def get_new_logit_and_prob_label(self, seg_logit, seg_label, prob_label):
+    def get_new_logit_and_one_prob_label(self, seg_logit, seg_label, prob_label):
+        B, C, H, W = seg_logit.shape
+        useful_idx = seg_label != self.ignore_index
+        useful_idx_1d = useful_idx.reshape(-1)
+        seg_logit_1d = seg_logit.permute(0, 2, 3, 1).reshape(-1, C)[useful_idx_1d]
+        seg_label_1d = seg_label.reshape(-1)[useful_idx_1d]
+        prob_label_1d = prob_label.reshape(-1)[useful_idx_1d]
+
+        seg_label_p_1d = torch.zeros_like(seg_logit_1d, device=seg_logit_1d.device)
+        all_idx = torch.arange(seg_logit_1d.shape[0], device=seg_logit_1d.device)
+        seg_label_p_1d[all_idx, seg_label_1d] = prob_label_1d
+        return seg_logit_1d, seg_label_p_1d
+
+    def get_new_logit_and_two_prob_label(self, seg_logit, seg_label, prob_label):
         B, C, H, W = seg_logit.shape
         useful_idx = seg_label != self.ignore_index
         useful_idx_1d = useful_idx.reshape(-1)
@@ -284,8 +304,10 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         seg_label_p_1d = torch.zeros_like(seg_logit_1d, device=seg_logit_1d.device)
         all_idx = torch.arange(seg_logit_1d.shape[0], device=seg_logit_1d.device)
         fore_idx = seg_label_1d != 0
+        back_idx = seg_logit_1d == 0
         seg_label_p_1d[all_idx, seg_label_1d] = prob_label_1d
         seg_label_p_1d[fore_idx, 0] = 1 - prob_label_1d[fore_idx]
+        seg_label_p_1d[back_idx, seg_label_1d] = 1 - prob_label_1d[back_idx]
         return seg_logit_1d, seg_label_p_1d
 
     @force_fp32(apply_to=('seg_logit',))
@@ -339,8 +361,8 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                         seg_label,
                         weight=seg_weight,
                         ignore_index=self.ignore_index)
-        elif self.use_prob['method'] == 'direct':
-            seg_logit2, seg_label_p = self.get_new_logit_and_prob_label(seg_logit, seg_label, prob_label)
+        else:
+            seg_logit2, seg_label_p = self.new_logit_and_prob_label_getter(seg_logit, seg_label, prob_label)
             if not isinstance(self.loss_decode, nn.ModuleList):
                 losses_decode = [self.loss_decode]
             else:
