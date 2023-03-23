@@ -1,8 +1,8 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from .compose import Compose
 from .formatting import (Collect, ImageToTensor, ToDataContainer, ToTensor,
-                         Transpose, to_tensor)
-from .loading import LoadAnnotations, LoadImageFromFile
+                         Transpose, to_tensor, MyFormatBundle)
+from .loading import LoadAnnotations, LoadImageFromFile, LoadAnnotationWithProbs
 from .test_time_aug import MultiScaleFlipAug
 from .transforms import (CLAHE, AdjustGamma, Normalize, Pad,
                          PhotoMetricDistortion, RandomCrop, RandomCutOut,
@@ -15,5 +15,5 @@ __all__ = [
     'MultiScaleFlipAug', 'Resize', 'RandomFlip', 'Pad', 'RandomCrop',
     'Normalize', 'SegRescale', 'PhotoMetricDistortion', 'RandomRotate',
     'AdjustGamma', 'CLAHE', 'Rerange', 'RGB2Gray', 'RandomCutOut',
-    'RandomMosaic'
+    'RandomMosaic', 'LoadAnnotationWithProbs', 'MyFormatBundle'
 ]

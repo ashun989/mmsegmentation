@@ -10,6 +10,7 @@ from mmseg.core import build_pixel_sampler
 from mmseg.ops import resize
 from ..builder import build_loss
 from ..losses import accuracy
+from ..losses import binary_cross_entropy
 
 
 class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
@@ -76,6 +77,8 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                      type='CrossEntropyLoss',
                      use_sigmoid=False,
                      loss_weight=1.0),
+                 with_prob=False,
+                 use_prob=dict(),
                  ignore_index=255,
                  sampler=None,
                  align_corners=False,
@@ -91,11 +94,14 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         self.act_cfg = act_cfg
         self.in_index = in_index
 
+        self.with_prob = with_prob
+        self.use_prob = use_prob if use_prob else None
+
         self.ignore_index = ignore_index
         self.align_corners = align_corners
         self.downsample_label_ratio = downsample_label_ratio
         if not isinstance(self.downsample_label_ratio, int) or \
-           self.downsample_label_ratio < 0:
+                self.downsample_label_ratio < 0:
             warnings.warn('downsample_label_ratio should '
                           'be set as an integer equal or larger than 0.')
 
@@ -267,10 +273,16 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         output = self.conv_seg(feat)
         return output
 
-    @force_fp32(apply_to=('seg_logit', ))
+    @force_fp32(apply_to=('seg_logit',))
     def losses(self, seg_logit, seg_label):
         """Compute segmentation loss."""
         loss = dict()
+
+        prob_label = None
+        if self.with_prob:
+            prob_label = seg_label - seg_label.floor()
+            seg_label = seg_label.floor().long()
+
         if self.downsample_label_ratio > 0:
             seg_label = seg_label.float()
             target_size = (seg_label.shape[2] // self.downsample_label_ratio,
@@ -278,6 +290,11 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             seg_label = resize(
                 input=seg_label, size=target_size, mode='nearest')
             seg_label = seg_label.long()
+            if prob_label is not None:
+                prob_label = resize(
+                    input=prob_label, size=target_size, mode='bilinear'
+                )
+
         seg_logit = resize(
             input=seg_logit,
             size=seg_label.shape[2:],
@@ -287,25 +304,69 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             seg_weight = self.sampler.sample(seg_logit, seg_label)
         else:
             seg_weight = None
-        seg_label = seg_label.squeeze(1)
-
-        if not isinstance(self.loss_decode, nn.ModuleList):
-            losses_decode = [self.loss_decode]
-        else:
-            losses_decode = self.loss_decode
-        for loss_decode in losses_decode:
-            if loss_decode.loss_name not in loss:
-                loss[loss_decode.loss_name] = loss_decode(
-                    seg_logit,
-                    seg_label,
-                    weight=seg_weight,
-                    ignore_index=self.ignore_index)
+        if self.use_prob is None:
+            seg_label = seg_label.squeeze(1)  # (B, H, W)
+            if not isinstance(self.loss_decode, nn.ModuleList):
+                losses_decode = [self.loss_decode]
             else:
-                loss[loss_decode.loss_name] += loss_decode(
-                    seg_logit,
-                    seg_label,
-                    weight=seg_weight,
-                    ignore_index=self.ignore_index)
+                losses_decode = self.loss_decode
+            for loss_decode in losses_decode:
+                if loss_decode.loss_name not in loss:
+                    loss[loss_decode.loss_name] = loss_decode(
+                        seg_logit,
+                        seg_label,
+                        weight=seg_weight,
+                        ignore_index=self.ignore_index)
+                else:
+                    loss[loss_decode.loss_name] += loss_decode(
+                        seg_logit,
+                        seg_label,
+                        weight=seg_weight,
+                        ignore_index=self.ignore_index)
+        elif self.use_prob['method'] == 'direct':
+            seg_label_p = torch.zeros_like(seg_logit)  # (B, C, H, W)
+            seg_label_p.scatter_(1, seg_label, prob_label)
+            # seg_label = seg_label_p
+            # when target of cross_entropy means probabilities, cannot use ignore_index
+            is_ignored = (seg_label == self.ignore_index).flatten()
+            B, C, H, W = seg_label_p.shape
+            # for b in range(B):
+            #     for h in range(H):
+            #         for w in range(W):
+            #             if is_ignored[b, 0, h, w]:
+            #                 seg_label_p[b, :, h, w] = seg_logit[b, :, h, w]
+            seg_label_p = seg_label_p.permute(0, 2, 3, 1).reshape(-1, C)
+            seg_logit = seg_logit.permute(0, 2, 3, 1).reshape(-1, C)
+            seg_label_p[is_ignored, torch.arange(C)] = seg_logit[is_ignored, torch.arange(C)]
+            seg_label_p = seg_label_p.reshape(B, H, W, C).permute(0, 3, 1, 2)
+            seg_logit = seg_logit.reshape(B, H, W, C).permute(0, 3, 1, 2)
+            if not isinstance(self.loss_decode, nn.ModuleList):
+                losses_decode = [self.loss_decode]
+            else:
+                losses_decode = self.loss_decode
+            for loss_decode in losses_decode:
+                if loss_decode.loss_name not in loss:
+                    loss[loss_decode.loss_name] = loss_decode(
+                        seg_logit,
+                        seg_label_p,
+                        weight=seg_weight,
+                        ignore_index=None)
+                else:
+                    loss[loss_decode.loss_name] += loss_decode(
+                        seg_logit,
+                        seg_label_p,
+                        weight=seg_weight,
+                        ignore_index=None)
+
+        # if prob_label is not None and self.use_prob is not None and self.use_prob['method'] == 'saliency':
+        #     exit(0)
+        #     loss_name = 'loss_saliency'
+        #     if loss_name not in loss:
+        #         loss['loss_obj'] = self.use_prob * binary_cross_entropy(
+        #             seg_logit, prob_label, weight=seg_weight, ignore_index=self.ignore_index)
+        #     else:
+        #         loss['loss_obj'] += self.use_prob * binary_cross_entropy(
+        #             seg_logit, prob_label, weight=seg_weight, ignore_index=self.ignore_index)
 
         loss['acc_seg'] = accuracy(
             seg_logit, seg_label, ignore_index=self.ignore_index)
