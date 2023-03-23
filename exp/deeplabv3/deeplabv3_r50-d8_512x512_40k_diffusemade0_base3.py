@@ -2,7 +2,7 @@ _base_ = ['./deeplabv3_r50-d8_512x512_40k_diffusemade0_base.py']
 
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
-crop_size = (320, 320)
+crop_size = (512, 512)
 
 train_pipeline = [
     dict(type='LoadImageFromFile'),
