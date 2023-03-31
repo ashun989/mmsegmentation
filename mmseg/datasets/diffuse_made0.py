@@ -26,5 +26,5 @@ class DiffuseMade0Dataset(CustomDataset):
 
     def __init__(self, split, **kwargs):
         super(DiffuseMade0Dataset, self).__init__(
-            img_suffix='.png', seg_map_suffix='.npy', split=split, **kwargs)
+            img_suffix='.png', seg_map_suffix='.png', split=split, **kwargs)
         assert osp.exists(self.img_dir)

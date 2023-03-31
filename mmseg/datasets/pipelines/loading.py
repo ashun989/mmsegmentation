@@ -3,6 +3,7 @@ import os.path as osp
 
 import mmcv
 import numpy as np
+import cv2
 
 from ..builder import PIPELINES
 
@@ -174,13 +175,11 @@ class LoadAnnotationWithProbs(object):
     """
 
     def __init__(self,
-                 reduce_zero_label=False,
-                 low_th=0.1,
-                 high_th=0.8):
-        assert 0 < low_th < high_th < 1, f'0, {low_th}, {high_th}, 1'
+                 reduce_zero_label=False):
+        # assert 0 < low_th < high_th < 1, f'0, {low_th}, {high_th}, 1'
         self.reduce_zero_label = reduce_zero_label
-        self.low_th = low_th
-        self.high_th = high_th
+        # self.low_th = low_th
+        # self.high_th = high_th
 
     def __call__(self, results):
         """Call function to load multiple types annotations.
@@ -198,18 +197,18 @@ class LoadAnnotationWithProbs(object):
                                 results['ann_info']['seg_map'])
         else:
             filename = results['ann_info']['seg_map']
-        ori_map = np.load(filename)
-        cls_map = ori_map.astype(np.uint8)
-        gt_semantic_prob = ori_map - cls_map
-        is_background = gt_semantic_prob <= self.low_th
-        is_foreground = gt_semantic_prob >= self.high_th
-        # is_ignored = ~(is_background | is_foreground)
 
-        gt_semantic_seg = np.ones_like(cls_map) * 255
-        gt_semantic_seg[is_foreground] = cls_map[is_foreground]
-        gt_semantic_seg[is_background] = 0
+        prob_filename = filename.replace('_label.png', '_prob.npy')
+        gt_semantic_seg = cv2.imread(filename, 0)
+        gt_semantic_prob = np.load(prob_filename)
+
+        is_background = gt_semantic_seg == 0
+        is_ignored = gt_semantic_seg == 255
+        is_foreground = ~(is_background | is_ignored)
 
         gt_semantic_prob[is_background] = 1 - gt_semantic_prob[is_background]
+        gt_semantic_prob[is_ignored] = 0
+        gt_semantic_prob /= 1.001   # IMPORTANT: max(prob) < 1.0
 
         # reduce zero_label
         if self.reduce_zero_label:
@@ -227,10 +226,11 @@ class LoadAnnotationWithProbs(object):
                 gt_semantic_seg[gt_semantic_seg_copy == old_id] = new_id
 
         gt_semantic_seg = gt_semantic_seg.astype(gt_semantic_prob.dtype)
-        gt_semantic_seg[is_foreground] += gt_semantic_prob[is_foreground]  # saving my coding time
         if not self.reduce_zero_label:
+            gt_semantic_seg[is_foreground] += gt_semantic_prob[is_foreground]  # saving my coding time
             gt_semantic_seg[is_background] += gt_semantic_prob[is_background]
-
+        else:
+            raise NotImplementedError()
         results['gt_semantic_seg'] = gt_semantic_seg
         # results['gt_semantic_prob'] = gt_semantic_prob
         results['seg_fields'].append('gt_semantic_seg')

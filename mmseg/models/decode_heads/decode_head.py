@@ -98,10 +98,11 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         self.use_prob = use_prob if use_prob else None
 
         self.new_logit_and_prob_label_getter = None
-        if self.use_prob['method'] == 'one_prob':
-            self.new_logit_and_prob_label_getter = self.get_new_logit_and_one_prob_label
-        elif self.use_prob['method'] == 'two_prob':
-            self.new_logit_and_prob_label_getter = self.get_new_logit_and_two_prob_label
+        if self.use_prob is not None:
+            if self.use_prob['method'] == 'one_prob':
+                self.new_logit_and_prob_label_getter = self.get_new_logit_and_one_prob_label
+            elif self.use_prob['method'] == 'two_prob':
+                self.new_logit_and_prob_label_getter = self.get_new_logit_and_two_prob_label
 
 
         self.ignore_index = ignore_index
