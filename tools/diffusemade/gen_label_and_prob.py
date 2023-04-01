@@ -78,7 +78,8 @@ def main():
     n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
     print(f"#jobs: {n_jobs}")
 
-    exp_name = f'dm{args.root[-1]}-{args.post}-{args.power}-{args.low}-{args.high}'
+    exp_name0 = f'{args.pre_power}-{args.post}-{args.power}-{args.low}-{args.high}'
+    exp_name = f'dm{args.root[-1]}-' + exp_name0
     if args.show_prob:
         exp_name += '-prob'
 
@@ -86,7 +87,7 @@ def main():
     data_info_dir = os.path.join(root_dir, 'data_info.json')
     img_dir = os.path.join(root_dir, 'img_dir', 'train')
     ann_dir = os.path.join(root_dir, 'ann_dir', 'train')
-    out_ann_dir = os.path.join(root_dir, f'pseudo-{exp_name}', 'train') if not args.eval_only else None
+    out_ann_dir = os.path.join(root_dir, f'pseudo-{exp_name0}', 'train') if not args.eval_only else None
     refer_dir = os.path.join(root_dir, args.refer)
     show_dir = None
     if args.show:
@@ -117,10 +118,10 @@ def main():
         data_info = json.load(fp)
 
     num_classes = len(CLASSES)
-    total_ai = torch.zeros((num_classes,), dtype=torch.float64)
-    total_au = torch.zeros((num_classes,), dtype=torch.float64)
-    total_ap = torch.zeros((num_classes,), dtype=torch.float64)
-    total_al = torch.zeros((num_classes,), dtype=torch.float64)
+    # total_ai = torch.zeros((num_classes,), dtype=torch.float64)
+    # total_au = torch.zeros((num_classes,), dtype=torch.float64)
+    # total_ap = torch.zeros((num_classes,), dtype=torch.float64)
+    # total_al = torch.zeros((num_classes,), dtype=torch.float64)
 
     postprocess = None
     if args.post == 'crf':
@@ -143,6 +144,8 @@ def main():
         gray_ann = cv2.imread(ann_path, 0).astype(np.float32)
         gray_ann = resize_ndarray(gray_ann, size=refer_ann.shape, mode='bilinear')
         prob = gray_ann / 255.0
+        if args.pre_power > 1.0:
+            prob = np.power(prob, args.pre_power)
         if postprocess is not None:
             prob = np.stack([1 - prob, prob], axis=0)
             img_path = os.path.join(img_dir, f"{di['img_index']:05}.png")
@@ -209,7 +212,7 @@ def main():
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='data/DiffuseMade2')
+    parser.add_argument('--root', type=str, default='data/DiffuseMade3')
     # parser.add_argument('--out', type=str, default='pseudo_0')
     parser.add_argument('--refer', type=str, default='pseudo_masks_aug')
     parser.add_argument('--low', type=float, default=0.05)
@@ -217,6 +220,7 @@ def parse_args():
     parser.add_argument('--post', type=str, choices=['no', 'crf', 'dcrf'], default='dcrf')
     parser.add_argument('--eval-only', action='store_true')
     parser.add_argument('--power', type=float, default=1.0)
+    parser.add_argument('--pre-power', type=float, default=1.0)
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--show-prob', action='store_true')
     parser.add_argument('--min-a', type=float, default=0.2)
