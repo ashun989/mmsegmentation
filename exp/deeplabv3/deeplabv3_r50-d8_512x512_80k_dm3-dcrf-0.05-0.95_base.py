@@ -12,7 +12,7 @@ data = dict(
     samples_per_gpu=8,
     workers_per_gpu=4,
     train=dict(
-        ann_dir='pseudo-dm3-dcrf-1.0-0.05-0.95-prob/train'
+        ann_dir='pseudo-1.0-dcrf-1.0-0.05-0.95/train'
     )
 )
 
