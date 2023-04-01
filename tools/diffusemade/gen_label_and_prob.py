@@ -145,8 +145,8 @@ def main():
         gray_ann = resize_ndarray(gray_ann, size=refer_ann.shape, mode='bilinear')
         prob = gray_ann / 255.0
         # if abs(args.pre_power - 1.0) > 1e-7:
-        prob = np.power(prob, args.pre_power)
         if postprocess is not None:
+            prob = np.power(prob, args.pre_power)
             prob = np.stack([1 - prob, prob], axis=0)
             img_path = os.path.join(img_dir, f"{di['img_index']:05}.png")
             img = cv2.imread(img_path, cv2.IMREAD_COLOR).astype(np.float32)
