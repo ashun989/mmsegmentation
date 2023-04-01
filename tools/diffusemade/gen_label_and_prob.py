@@ -144,7 +144,7 @@ def main():
         gray_ann = cv2.imread(ann_path, 0).astype(np.float32)
         gray_ann = resize_ndarray(gray_ann, size=refer_ann.shape, mode='bilinear')
         prob = gray_ann / 255.0
-        if args.pre_power > 1.0:
+        if abs(args.power - 1.0) < 1e-7:
             prob = np.power(prob, args.pre_power)
         if postprocess is not None:
             prob = np.stack([1 - prob, prob], axis=0)
@@ -155,7 +155,7 @@ def main():
             prob = postprocess(img, prob)
             prob = prob[1]
 
-        if args.power > 1.0:
+        if abs(args.power - 1.0) < 1e-7:
             prob = np.power(prob, args.power)
 
         label = np.full(refer_ann.shape, 255, dtype=np.uint8)
