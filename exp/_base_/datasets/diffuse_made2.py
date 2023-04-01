@@ -1,6 +1,6 @@
 # dataset settings
 dataset_type = 'DiffuseMade0Dataset'
-data_root = 'data/DiffuseMade0'
+data_root = 'data/DiffuseMade2'
 dataset_type2 = 'PascalVOCDataset'
 data_root2 = 'data/VOCdevkit/VOC2012'
 
@@ -9,14 +9,14 @@ img_norm_cfg = dict(
 crop_size = (320, 320)
 train_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotationWithProbs'),
+    dict(type='LoadAnnotations'),
     dict(type='Resize', img_scale=(512, 512), ratio_range=(0.5, 2.0)),
     dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
     dict(type='RandomFlip', prob=0.5),
     dict(type='PhotoMetricDistortion'),
     dict(type='Normalize', **img_norm_cfg),
     dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=255),
-    dict(type='MyFormatBundle'),
+    dict(type='DefaultFormatBundle'),
     dict(type='Collect', keys=['img', 'gt_semantic_seg']),
 ]
 test_pipeline = [
@@ -48,13 +48,13 @@ data = dict(
         type=dataset_type2,
         data_root=data_root2,
         img_dir='JPEGImages',
-        ann_dir='SegmentationClassAug',
+        ann_dir='SegmentationClass',
         split='ImageSets/Segmentation/val.txt',
         pipeline=test_pipeline),
     test=dict(
         type=dataset_type2,
         data_root=data_root2,
         img_dir='JPEGImages',
-        ann_dir='SegmentationClassAug',
+        ann_dir='SegmentationClass',
         split='ImageSets/Segmentation/val.txt',
         pipeline=test_pipeline))

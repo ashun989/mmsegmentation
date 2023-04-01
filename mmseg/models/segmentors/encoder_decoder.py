@@ -9,6 +9,40 @@ from .. import builder
 from ..builder import SEGMENTORS
 from .base import BaseSegmentor
 
+import pydensecrf.densecrf as dcrf
+import pydensecrf.utils as utils
+import numpy as np
+import cv2
+import mmcv
+
+class DenseCRF(object):
+    def __init__(self, iter_max, pos_w, pos_xy_std, bi_w, bi_xy_std, bi_rgb_std):
+        self.iter_max = iter_max
+        self.pos_w = pos_w
+        self.pos_xy_std = pos_xy_std
+        self.bi_w = bi_w
+        self.bi_xy_std = bi_xy_std
+        self.bi_rgb_std = bi_rgb_std
+
+    def __call__(self, image, probmap):
+        C, H, W = probmap.shape
+
+        U = utils.unary_from_softmax(probmap)
+        U = np.ascontiguousarray(U)
+
+        image = np.ascontiguousarray(image)
+
+        d = dcrf.DenseCRF2D(W, H, C)
+        d.setUnaryEnergy(U)
+        d.addPairwiseGaussian(sxy=self.pos_xy_std, compat=self.pos_w)
+        d.addPairwiseBilateral(
+            sxy=self.bi_xy_std, srgb=self.bi_rgb_std, rgbim=image, compat=self.bi_w
+        )
+
+        Q = d.inference(self.iter_max)
+        Q = np.array(Q).reshape((C, H, W))
+
+        return Q
 
 @SEGMENTORS.register_module()
 class EncoderDecoder(BaseSegmentor):
@@ -26,6 +60,7 @@ class EncoderDecoder(BaseSegmentor):
                  auxiliary_head=None,
                  train_cfg=None,
                  test_cfg=None,
+                 post_cfg=None,
                  pretrained=None,
                  init_cfg=None):
         super(EncoderDecoder, self).__init__(init_cfg)
@@ -41,6 +76,11 @@ class EncoderDecoder(BaseSegmentor):
 
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
+
+        self.post_processer = None
+        if post_cfg is not None:
+            if post_cfg['method'] == 'dcrf':
+                self.post_processer = DenseCRF(**post_cfg['kwargs'])
 
         assert self.with_decode_head
 
@@ -259,6 +299,15 @@ class EncoderDecoder(BaseSegmentor):
             elif flip_direction == 'vertical':
                 output = output.flip(dims=(2, ))
 
+        if self.post_processer is not None:
+            # print(output.dtype)
+            assert output.shape[0] == 1
+            output = output[0].cpu().numpy()
+            ori_img = cv2.imread(img_meta[0]['filename'], cv2.IMREAD_COLOR).astype(np.float32)
+            ori_img -= img_meta[0]['img_norm_cfg']['mean']
+            ori_img = ori_img.astype(np.uint8)
+            output = self.post_processer(ori_img, output)
+            output = torch.from_numpy(output).unsqueeze(0)
         return output
 
     def simple_test(self, img, img_meta, rescale=True):
