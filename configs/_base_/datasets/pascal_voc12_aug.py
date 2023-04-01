@@ -1,4 +1,4 @@
-_base_ = './diffuse_made0.py'
+_base_ = './pascal_voc12.py'
 # dataset settings
 data = dict(
     train=dict(

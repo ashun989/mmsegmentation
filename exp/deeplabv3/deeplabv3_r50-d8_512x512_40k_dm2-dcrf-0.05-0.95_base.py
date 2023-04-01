@@ -5,7 +5,7 @@ _base_ = ['../_base_/models/deeplabv3_r50-d8.py',
 
 model = dict(
     decode_head=dict(num_classes=21, with_prob=False),
-    auxiliary_head=dict(num_classes=21, with_prob=False)
+    auxiliary_head=dict(num_classes=21, with_prob=False),
 )
 
 data = dict(

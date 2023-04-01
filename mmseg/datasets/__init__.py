@@ -21,6 +21,7 @@ from .pascal_context import PascalContextDataset, PascalContextDataset59
 from .potsdam import PotsdamDataset
 from .stare import STAREDataset
 from .voc import PascalVOCDataset
+from .voc2 import PascalVOCDataset2
 from .diffuse_made0 import DiffuseMade0Dataset
 
 __all__ = [
@@ -32,5 +33,5 @@ __all__ = [
     'COCOStuffDataset', 'LoveDADataset', 'MultiImageMixDataset',
     'iSAIDDataset', 'ISPRSDataset', 'PotsdamDataset', 'FaceOccludedDataset',
     'ImageNetSDataset', 'LoadImageNetSAnnotations',
-    'LoadImageNetSImageFromFile', 'DiffuseMade0Dataset'
+    'LoadImageNetSImageFromFile', 'DiffuseMade0Dataset', 'PascalVOCDataset2'
 ]
