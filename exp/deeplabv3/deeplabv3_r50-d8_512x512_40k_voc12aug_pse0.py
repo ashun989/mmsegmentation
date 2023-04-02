@@ -13,4 +13,8 @@ data = dict(
 )
 
 model = dict(
-    decode_head=dict(num_classes=21), auxiliary_head=dict(num_classes=21))
+    decode_head=dict(num_classes=21,
+                     with_prob=False),
+    auxiliary_head=dict(num_classes=21,
+                        with_prob=False)
+)
