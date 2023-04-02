@@ -3,6 +3,6 @@ _base_ = './pascal_voc12.py'
 data = dict(
     train=dict(
         ann_dir='SegmentationClassAug',
-        split='ImageSets/Segmentation/_aug.txt'
+        split='ImageSets/Segmentation/train_aug.txt'
     )
 )
