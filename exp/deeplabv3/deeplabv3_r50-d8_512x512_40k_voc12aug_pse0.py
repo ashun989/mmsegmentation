@@ -5,6 +5,8 @@ _base_ = [
 ]
 
 data = dict(
+    samples_per_gpu=8,
+    workers_per_gpu=4,
     train=dict(
         ann_dir='SegmentationClassAug_pse0',
     )
