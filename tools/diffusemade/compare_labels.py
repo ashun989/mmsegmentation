@@ -49,8 +49,8 @@ def print_results(results, cls_names, out_path=None):
 def parse_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument('img', type=str, help='Path to Images')
-    parser.add_argument('l1', type=str, help='Path to Labels 1')
-    parser.add_argument('l2', type=str, help='Path to Labels 2')
+    parser.add_argument('l1', type=str, help='Path to Labels 1, like pred')
+    parser.add_argument('l2', type=str, help='Path to Labels 2, like gt')
     parser.add_argument('--split', type=str, default=None, help='Split file')
     # parser.add_argument('--img-suffix', type=str, default='.jpg')
     parser.add_argument('--label-suffix', type=str, default='.png')
