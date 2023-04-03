@@ -60,10 +60,10 @@ def main():
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='data/DiffuseMade2')
-    parser.add_argument('--ann', type=str, default='data/DiffuseMade2/pseudo_masks_aug')
+    parser.add_argument('--root', type=str, default='data/DiffuseMade3')
+    parser.add_argument('--ann', type=str, default='data/DiffuseMade3/pseudo_masks_aug')
     parser.add_argument('--ann-suffix', type=str, default='.png')
-    parser.add_argument('--show-dir', type=str, default='work_dirs/show/dm2_pseudo_masks_aug')
+    parser.add_argument('--show-dir', type=str, default='work_dirs/show/dm3_pseudo_masks_aug')
     parser.add_argument('--n-jobs', type=int, default=None)
     return parser.parse_args()
 
