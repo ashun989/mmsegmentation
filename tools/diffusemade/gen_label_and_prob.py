@@ -105,6 +105,14 @@ def act_piece_wise(x, low, high):
     return y
 
 
+def read_gray(path):
+    return cv2.imread(path, 0)
+
+
+def read_npy(path):
+    return np.load(path)
+
+
 def main():
     n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
     print(f"#jobs: {n_jobs}")
@@ -139,6 +147,12 @@ def main():
     show_dir = os.path.join(root_dir, args.out_dir, 'show', exp_name0)
     sta_dir = os.path.join(root_dir, args.out_dir, 'statistics', exp_name0)
     refer_dir = os.path.join(root_dir, args.refer)
+
+    if args.ann_suffix == '.png':
+        ann_reader = read_gray
+    else:
+        ann_reader = read_npy
+
     # refer_dir = args.refer
     # show_dir = None
     if args.show:
@@ -193,14 +207,14 @@ def main():
     def process(i):
         di = data_info[i]
         cls_id = cls_name2id[di['concept']]
-        filename = f"{di['img_index']:08}.png"
-        ann_path = os.path.join(ann_dir, f"{di['img_index']:08}.png")
-        refer_ann_path = os.path.join(refer_dir, filename)
-        refer_ann = cv2.imread(refer_ann_path, 0)
+        refer_name = f"{di['img_index']:08}.png"
+        ann_path = os.path.join(ann_dir, f"{di['img_index']:08}{args.ann_suffix}")
+        refer_ann_path = os.path.join(refer_dir, refer_name)
+        refer_ann = read_gray(refer_ann_path)
         if args.refrain:
             refer_ignored = ~((refer_ann == cls_id) | (refer_ann == 0))
             refer_ann[refer_ignored] = 255
-        gray_ann = cv2.imread(ann_path, 0).astype(np.float32)
+        gray_ann = ann_reader(ann_path)
         gray_ann = resize_ndarray(gray_ann, size=refer_ann.shape, mode='bilinear')
         prob = gray_ann / 255.0
         # if abs(args.pre_power - 1.0) > 1e-7:
@@ -208,7 +222,7 @@ def main():
             prob = pre_act(prob)
         if postprocess is not None:
             prob = np.stack([1 - prob, prob], axis=0)
-            img_path = os.path.join(img_dir, f"{di['img_index']:08}.png")
+            img_path = os.path.join(img_dir, f"{di['img_index']:08}{args.img_suffix}")
             img = cv2.imread(img_path, cv2.IMREAD_COLOR).astype(np.float32)
             img -= mean_bgr
             img = img.astype(np.uint8)
@@ -281,6 +295,9 @@ def parse_args():
     parser.add_argument('--ann-dir', type=str, default='ann_dir/train')
     parser.add_argument('--out-dir', type=str, default='.')
     parser.add_argument('--refer', type=str, default='deeplabv3-r50-d8_512x512_40k')
+
+    parser.add_argument('--ann-suffix', type=str, default='.png', choices=['.png', '.npy'])
+    parser.add_argument('--img-suffix', type=str, default='.png')
 
     parser.add_argument('--refrain', action='store_true')
     parser.add_argument('--low', type=float, default=0.08)
