@@ -198,7 +198,7 @@ class LoadAnnotationWithProbs(object):
         else:
             filename = results['ann_info']['seg_map']
 
-        prob_filename = filename.replace('_label.png', '_prob.npy')
+        prob_filename = filename.replace('.png', '_prob.npy')
         gt_semantic_seg = cv2.imread(filename, 0)
         gt_semantic_prob = np.load(prob_filename)
 

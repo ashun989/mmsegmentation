@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import os.path as osp
 import cv2
@@ -51,6 +52,7 @@ def parse_args():
     # parser.add_argument('img', type=str, help='Path to Images')
     parser.add_argument('l1', type=str, help='Path to Labels 1, like pred')
     parser.add_argument('l2', type=str, help='Path to Labels 2, like gt')
+    parser.add_argument('--refrain-info', type=str, default=None, help='use l1 name to refrain l2 cls')
     parser.add_argument('--split', type=str, default=None, help='Split file')
     # parser.add_argument('--img-suffix', type=str, default='.jpg')
     parser.add_argument('--label-suffix', type=str, default='.png')
@@ -87,12 +89,27 @@ def main():
         cls_names = VOC_CLASSES
     num_classes = len(cls_names)
 
+    name2cls = {}
+    if args.refrain_info is not None:
+        cls_name2id = {}
+        for id, name in enumerate(cls_names):
+            cls_name2id[name] = id
+        data_info_path = args.refrain_info
+        with open(data_info_path, 'r') as fp:
+            data_info = json.load(fp)
+        for di in data_info:
+            name2cls[int(di['img_index'])] = cls_name2id[di['concept']]
+
     def process(i):
         name = file_list[i]
         l1_path = osp.join(args.l1, name + args.label_suffix)
         l2_path = osp.join(args.l2, name + args.label_suffix)
         l1 = cv2.imread(l1_path, 0)
         l2 = cv2.imread(l2_path, 0)
+        if name2cls:
+            cls_id = name2cls[int(name)]
+            refer_ignored = ~((l2 == cls_id) | (l2 == 0))
+            l2[refer_ignored] = args.ignore
         return intersect_and_union(l1, l2, num_classes=num_classes, ignore_index=args.ignore)
 
     n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
