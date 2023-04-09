@@ -13,8 +13,7 @@ log_config = dict(
              interval=50,
              log_checkpoint=True,
              log_checkpoint_metadata=True,
-             num_eval_images=100,
-             bbox_score_thr=0.3)
+             num_eval_images=100)
     ])
 # yapf:enable
 dist_params = dict(backend='nccl')
