@@ -9,7 +9,7 @@ do
   do
     for th in $ths
     do
-      python tools/diffusemade/gen_label_and_prob.py --test --root data/DiffuseMade_test5 \
+      python tools/diffusemade/gen_label_and_prob.py --root data/DiffuseMade_test5 \
         --img-dir "${name}/img_dir/train" \
         --ann-dir "${name}/${ann}/train" \
         --out-dir "output/${name}-${ann}" \

@@ -124,12 +124,12 @@ def main():
         pre_act = partial(act_piece_wise, low=args.pre_low, high=args.pre_high)
     else:
         exp_name0 = f'{args.post}-{args.low}-{args.high}'
-    if args.test:
-        exp_name = f'dm-test{args.root[-1]}-' + exp_name0
-    else:
-        exp_name = f'dm{args.root[-1]}-' + exp_name0
-    if args.show_prob:
-        exp_name += '-prob'
+    # if args.test:
+    #     exp_name = f'dm-test{args.root[-1]}-' + exp_name0
+    # else:
+    #     exp_name = f'dm{args.root[-1]}-' + exp_name0
+    # if args.show_prob:
+    #     exp_name += '-prob'
 
     root_dir = args.root
     data_info_dir = os.path.join(root_dir, 'data_info.json')
@@ -295,7 +295,7 @@ def parse_args():
     parser.add_argument('--pre-low', type=float, default=0.25)
     parser.add_argument('--pre-high', type=float, default=0.75)
     parser.add_argument('--gen-prob', action='store_true')
-    parser.add_argument('--test', action='store_true')
+    # parser.add_argument('--test', action='store_true')
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--show-prob', action='store_true')
     parser.add_argument('--min-a', type=float, default=0.4)

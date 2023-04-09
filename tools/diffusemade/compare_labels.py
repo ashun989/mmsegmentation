@@ -70,19 +70,24 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def get_file_list(l1, label_suffix, split):
     file_list = []
-    if args.split is not None:
-        with open(args.split, 'r') as fp:
+    if split is not None:
+        with open(split, 'r') as fp:
             while True:
                 a_line = fp.readline()
                 if not a_line:
                     break
                 file_list.append(a_line.strip())
     else:
-        for fname in os.listdir(args.l1):
-            if fname.endswith(args.label_suffix):
+        for fname in os.listdir(l1):
+            if fname.endswith(label_suffix):
                 file_list.append(osp.splitext(fname)[0])
+    return file_list
+
+
+def main():
+    file_list = get_file_list(args.l1, args.label_suffix, args.split)
 
     cls_names = None
     if args.dataset == 'voc':

@@ -118,3 +118,7 @@ mmseg/.mim
 
 # Pytorch
 *.pth
+pretrained
+work_dirs
+artifacts
+wandb
