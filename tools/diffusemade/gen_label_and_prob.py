@@ -14,6 +14,10 @@ from mmseg.core.evaluation.metrics import intersect_and_union, total_area_to_met
 import pydensecrf.densecrf as dcrf
 import pydensecrf.utils as utils
 
+from functools import partial
+
+from compare_labels import print_results
+
 CLASSES = ('background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
            'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog',
            'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
@@ -56,15 +60,15 @@ class DenseCRF(object):
         return Q
 
 
-def print_results(results):
-    iou_list = results['IoU']
-    acc_list = results['Acc']
-    for cid, cname in enumerate(CLASSES):
-        print(f"{cid:5}, {cname:15}, {iou_list[cid] * 100:.2f}, {acc_list[cid] * 100:.2f}")
-
-    miou = np.nanmean(iou_list)
-    macc = np.nanmean(acc_list)
-    print(f"miou: {miou * 100:.2f}, macc: {macc * 100:.2f}")
+# def print_results(results):
+#     iou_list = results['IoU']
+#     acc_list = results['Acc']
+#     for cid, cname in enumerate(CLASSES):
+#         print(f"{cid:5}, {cname:15}, {iou_list[cid] * 100:.2f}, {acc_list[cid] * 100:.2f}")
+#
+#     miou = np.nanmean(iou_list)
+#     macc = np.nanmean(acc_list)
+#     print(f"miou: {miou * 100:.2f}, macc: {macc * 100:.2f}")
 
 
 def resize_ndarray(arr, **kwargs):
@@ -74,12 +78,46 @@ def resize_ndarray(arr, **kwargs):
     return t_arr[0][0].cpu().numpy()
 
 
+def act_power(x, p=1.0):
+    return np.power(x, p)
+
+
+def act_tanh(x, mid=0.5, sat=4):
+    y = 1 / (1 + np.exp(-2 * sat * (x - mid)))
+    return (y - np.min(y)) / (np.max(y) - np.min(y))
+
+
+def act_tanh2(x, mid=0.5, sat=4):
+    up_range = 1.0 - mid
+    lo_range = mid
+    up_idx = x > mid
+    lo_idx = x < mid
+    y = x.copy()
+    y[up_idx] = 1 / (1 + np.exp(- (sat / up_range) * (x[up_idx] - mid)))
+    y[lo_idx] = 1 / (1 + np.exp(- (sat / lo_range) * (x[lo_idx] - mid)))
+    return (y - np.min(y)) / (np.max(y) - np.min(y))
+
+
 def main():
     n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
     print(f"#jobs: {n_jobs}")
 
-    exp_name0 = f'{args.pre_power}-{args.post}-{args.power}-{args.low}-{args.high}'
-    exp_name = f'dm{args.root[-1]}-' + exp_name0
+    pre_act = None
+    if args.pre_act == 'pow':
+        exp_name0 = f'{args.pre_act}-{args.pre_power}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_power, p=args.pre_power)
+    elif args.pre_act == 'tanh':
+        exp_name0 = f'{args.pre_act}-{args.pre_mid}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_tanh, mid=args.pre_mid, sat=args.pre_sat)
+    elif args.pre_act == 'tanh2':
+        exp_name0 = f'{args.pre_act}-{args.pre_mid}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_tanh2, mid=args.pre_mid, sat=args.pre_sat)
+    else:
+        exp_name0 = f'{args.post}-{args.low}-{args.high}'
+    if args.test:
+        exp_name = f'dm-test{args.root[-1]}-' + exp_name0
+    else:
+        exp_name = f'dm{args.root[-1]}-' + exp_name0
     if args.show_prob:
         exp_name += '-prob'
 
@@ -100,11 +138,12 @@ def main():
     palette_bgr = np.array(PALETTE)[:, ::-1]
     mean_bgr = (104.008, 116.669, 122.675)
 
-    assert 0 < args.min_a < args.max_a < 1.0
-    theta_1 = (args.max_a - args.min_a) / (1.0 - args.high)
-    beta_1 = args.max_a - theta_1
-    theta_2 = (args.max_a - args.min_a) / (args.low)
-    beta_2 = args.max_a - theta_2
+    if args.show_prob:
+        assert 0 < args.min_a < args.max_a < 1.0
+        theta_1 = (args.max_a - args.min_a) / (1.0 - args.high)
+        beta_1 = args.max_a - theta_1
+        theta_2 = (args.max_a - args.min_a) / (args.low)
+        beta_2 = args.max_a - theta_2
 
     if args.show and args.show_prob:
         print(f"f(p) = {theta_1}p + {beta_1}: ({args.high}, 1.0) -> ({args.min_a}, {args.max_a})")
@@ -118,21 +157,20 @@ def main():
         data_info = json.load(fp)
 
     num_classes = len(CLASSES)
-    # total_ai = torch.zeros((num_classes,), dtype=torch.float64)
-    # total_au = torch.zeros((num_classes,), dtype=torch.float64)
-    # total_ap = torch.zeros((num_classes,), dtype=torch.float64)
-    # total_al = torch.zeros((num_classes,), dtype=torch.float64)
 
     postprocess = None
     if args.post == 'crf':
         raise NotImplementedError()
     elif args.post == 'dcrf':
         postprocess = DenseCRF(iter_max=10,
-                               pos_xy_std=1,
+                               pos_xy_std=1,  # 1
                                pos_w=3,
-                               bi_xy_std=67,
-                               bi_rgb_std=3,
+                               bi_xy_std=67,  # 67
+                               bi_rgb_std=3,  # 3
                                bi_w=4, )
+
+    metrics = args.eval
+    assert metrics is not None
 
     def process(i):
         di = data_info[i]
@@ -141,12 +179,16 @@ def main():
         ann_path = os.path.join(ann_dir, f"{di['img_index']:05}.png")
         refer_ann_path = os.path.join(refer_dir, filename)
         refer_ann = cv2.imread(refer_ann_path, 0)
+        if args.refrain:
+            refer_ignored = ~((refer_ann == cls_id) | (refer_ann == 0))
+            refer_ann[refer_ignored] = 255
         gray_ann = cv2.imread(ann_path, 0).astype(np.float32)
         gray_ann = resize_ndarray(gray_ann, size=refer_ann.shape, mode='bilinear')
         prob = gray_ann / 255.0
         # if abs(args.pre_power - 1.0) > 1e-7:
+        if pre_act is not None:
+            prob = pre_act(prob)
         if postprocess is not None:
-            prob = np.power(prob, args.pre_power)
             prob = np.stack([1 - prob, prob], axis=0)
             img_path = os.path.join(img_dir, f"{di['img_index']:05}.png")
             img = cv2.imread(img_path, cv2.IMREAD_COLOR).astype(np.float32)
@@ -156,7 +198,7 @@ def main():
             prob = prob[1]
 
         # if abs(args.power - 1.0) > 1e-7:
-        prob = np.power(prob, args.power)
+        # prob = np.power(prob, args.power)
 
         label = np.full(refer_ann.shape, 255, dtype=np.uint8)
         is_background = prob <= args.low
@@ -204,28 +246,42 @@ def main():
     total_au = torch.sum(torch.stack(aus, dim=0), dim=0)
     total_ap = torch.sum(torch.stack(aps, dim=0), dim=0)
     total_al = torch.sum(torch.stack(als, dim=0), dim=0)
-
-    results = total_area_to_metrics(total_ai, total_au, total_ap, total_al, metrics=['mIoU'])
-    # print(results)
-    print_results(results)
+    results = total_area_to_metrics(total_ai, total_au, total_ap, total_al, metrics=metrics)
+    results['Area_i'] = total_ai.numpy()
+    results['Area_u'] = total_au.numpy()
+    results['Area_l1'] = total_ap.numpy()
+    results['Area_l2'] = total_al.numpy()
+    print_results(results, CLASSES, args.out)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', type=str, default='data/DiffuseMade3')
+    parser.add_argument('--root', type=str, default='data/DiffuseMade_test1')
     # parser.add_argument('--out', type=str, default='pseudo_0')
-    parser.add_argument('--refer', type=str, default='pseudo_masks_aug')
+    parser.add_argument('--refer', type=str, default='deeplabv3-r50-d8_512x512_40k')
+    parser.add_argument('--refrain', action='store_true')
     parser.add_argument('--low', type=float, default=0.05)
     parser.add_argument('--high', type=float, default=0.95)
     parser.add_argument('--post', type=str, choices=['no', 'crf', 'dcrf'], default='dcrf')
     parser.add_argument('--eval-only', action='store_true')
-    parser.add_argument('--power', type=float, default=1.0)
+    # parser.add_argument('--power', type=float, default=1.0)
+    parser.add_argument('--pre-act', type=str, choices=['pow', 'tanh', 'tanh2', 'no'], default='pow')
     parser.add_argument('--pre-power', type=float, default=1.0)
+    parser.add_argument('--pre-mid', type=float, default=0.5)
+    parser.add_argument('--pre-sat', type=float, default=4.0)
+    parser.add_argument('--test', action='store_true')
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--show-prob', action='store_true')
-    parser.add_argument('--min-a', type=float, default=0.2)
-    parser.add_argument('--max-a', type=float, default=0.7)
+    parser.add_argument('--min-a', type=float, default=0.4)
+    parser.add_argument('--max-a', type=float, default=0.8)
     parser.add_argument('--n-jobs', type=int, default=None)
+    parser.add_argument('--out', type=str, default=None)
+    parser.add_argument(
+        '--eval',
+        type=str,
+        nargs='+',
+        help='evaluation metrics, which depends on the dataset, e.g., "mIoU"'
+             ' for generic datasets, and "cityscapes" for Cityscapes')
 
     return parser.parse_args()
 
