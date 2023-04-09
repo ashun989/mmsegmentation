@@ -98,6 +98,13 @@ def act_tanh2(x, mid=0.5, sat=4):
     return (y - np.min(y)) / (np.max(y) - np.min(y))
 
 
+def act_piece_wise(x, low, high):
+    y = x.copy()
+    y[y < low] = 0
+    y[y > high] = 1
+    return y
+
+
 def main():
     n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
     print(f"#jobs: {n_jobs}")
@@ -112,6 +119,9 @@ def main():
     elif args.pre_act == 'tanh2':
         exp_name0 = f'{args.pre_act}-{args.pre_mid}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
         pre_act = partial(act_tanh2, mid=args.pre_mid, sat=args.pre_sat)
+    elif args.pre_act == 'piece':
+        exp_name0 = f'{args.pre_act}-{args.pre_low}-{args.pre_high}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_piece_wise, low=args.pre_low, high=args.pre_high)
     else:
         exp_name0 = f'{args.post}-{args.low}-{args.high}'
     if args.test:
@@ -123,14 +133,22 @@ def main():
 
     root_dir = args.root
     data_info_dir = os.path.join(root_dir, 'data_info.json')
-    img_dir = os.path.join(root_dir, 'img_dir', 'train')
-    ann_dir = os.path.join(root_dir, 'ann_dir', 'train')
-    out_ann_dir = os.path.join(root_dir, f'pseudo-{exp_name0}', 'train') if not args.eval_only else None
+    img_dir = os.path.join(root_dir, args.img_dir)
+    ann_dir = os.path.join(root_dir, args.ann_dir)
+    out_ann_dir = os.path.join(root_dir, args.out_dir, 'out_ann_dir', exp_name0)
+    show_dir = os.path.join(root_dir, args.out_dir, 'show', exp_name0)
+    sta_dir = os.path.join(root_dir, args.out_dir, 'statistics', exp_name0)
     refer_dir = os.path.join(root_dir, args.refer)
-    show_dir = None
+    # refer_dir = args.refer
+    # show_dir = None
     if args.show:
-        show_dir = os.path.join('work_dirs', 'show', exp_name)
         os.makedirs(show_dir, exist_ok=True)
+    if not args.eval_only:
+        os.makedirs(out_ann_dir, exist_ok=True)
+
+    os.makedirs(sta_dir, exist_ok=True)
+    sta_path = os.path.join(sta_dir, 'deeplabv3*.txt')
+
     cls_name2id = {}
     for id, name in enumerate(CLASSES):
         cls_name2id[name] = id
@@ -152,7 +170,7 @@ def main():
     if not args.eval_only:
         os.makedirs(out_ann_dir, exist_ok=True)
 
-    data_info_path = os.path.join(root_dir, 'data_info.json')
+    data_info_path = os.path.join(root_dir, 'data_infos.json')
     with open(data_info_path, 'r') as fp:
         data_info = json.load(fp)
 
@@ -175,8 +193,8 @@ def main():
     def process(i):
         di = data_info[i]
         cls_id = cls_name2id[di['concept']]
-        filename = f"{di['img_index']:05}.png"
-        ann_path = os.path.join(ann_dir, f"{di['img_index']:05}.png")
+        filename = f"{di['img_index']:08}.png"
+        ann_path = os.path.join(ann_dir, f"{di['img_index']:08}.png")
         refer_ann_path = os.path.join(refer_dir, filename)
         refer_ann = cv2.imread(refer_ann_path, 0)
         if args.refrain:
@@ -190,7 +208,7 @@ def main():
             prob = pre_act(prob)
         if postprocess is not None:
             prob = np.stack([1 - prob, prob], axis=0)
-            img_path = os.path.join(img_dir, f"{di['img_index']:05}.png")
+            img_path = os.path.join(img_dir, f"{di['img_index']:08}.png")
             img = cv2.imread(img_path, cv2.IMREAD_COLOR).astype(np.float32)
             img -= mean_bgr
             img = img.astype(np.uint8)
@@ -208,17 +226,18 @@ def main():
         label[is_foreground] = cls_id
         ai, au, ap, al = intersect_and_union(label, refer_ann, num_classes, ignore_index=255)
         if not args.eval_only:
-            out_label_path = os.path.join(out_ann_dir, f"{di['img_index']:05}.png")
-            out_prob_path = os.path.join(out_ann_dir, f"{di['img_index']:05}_prob.npy")
+            out_label_path = os.path.join(out_ann_dir, f"{di['img_index']:08}.png")
             cv2.imwrite(out_label_path, label)
-            np.save(out_prob_path, prob)
+            if args.gen_prob:
+                out_prob_path = os.path.join(out_ann_dir, f"{di['img_index']:08}_prob.npy")
+                np.save(out_prob_path, prob)
         if show_dir is not None:
             is_ignore = label == 255
             label[is_ignore] = 0
             show_map = palette_bgr[label]
             show_map[is_ignore] = np.array([255, 255, 255])
-            show_path = os.path.join(show_dir, f"{di['img_index']:05}.png")
-            img_path = os.path.join(img_dir, f"{di['img_index']:05}.png")
+            show_path = os.path.join(show_dir, f"{di['img_index']:08}.png")
+            img_path = os.path.join(img_dir, f"{di['img_index']:08}.png")
             img = cv2.imread(img_path, cv2.IMREAD_COLOR)  # BGR
             if args.show_prob:
                 show_lu = prob.copy()
@@ -251,31 +270,37 @@ def main():
     results['Area_u'] = total_au.numpy()
     results['Area_l1'] = total_ap.numpy()
     results['Area_l2'] = total_al.numpy()
-    print_results(results, CLASSES, args.out)
+    print_results(results, CLASSES, sta_path)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, default='data/DiffuseMade_test1')
-    # parser.add_argument('--out', type=str, default='pseudo_0')
+    # after root
+    parser.add_argument('--img-dir', type=str, default='img_dir/train')
+    parser.add_argument('--ann-dir', type=str, default='ann_dir/train')
+    parser.add_argument('--out-dir', type=str, default='.')
     parser.add_argument('--refer', type=str, default='deeplabv3-r50-d8_512x512_40k')
+
     parser.add_argument('--refrain', action='store_true')
-    parser.add_argument('--low', type=float, default=0.05)
+    parser.add_argument('--low', type=float, default=0.08)
     parser.add_argument('--high', type=float, default=0.95)
     parser.add_argument('--post', type=str, choices=['no', 'crf', 'dcrf'], default='dcrf')
     parser.add_argument('--eval-only', action='store_true')
     # parser.add_argument('--power', type=float, default=1.0)
-    parser.add_argument('--pre-act', type=str, choices=['pow', 'tanh', 'tanh2', 'no'], default='pow')
+    parser.add_argument('--pre-act', type=str, choices=['pow', 'tanh', 'tanh2', 'piece', 'no'], default='pow')
     parser.add_argument('--pre-power', type=float, default=1.0)
     parser.add_argument('--pre-mid', type=float, default=0.5)
     parser.add_argument('--pre-sat', type=float, default=4.0)
+    parser.add_argument('--pre-low', type=float, default=0.25)
+    parser.add_argument('--pre-high', type=float, default=0.75)
+    parser.add_argument('--gen-prob', action='store_true')
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--show', action='store_true')
     parser.add_argument('--show-prob', action='store_true')
     parser.add_argument('--min-a', type=float, default=0.4)
     parser.add_argument('--max-a', type=float, default=0.8)
     parser.add_argument('--n-jobs', type=int, default=None)
-    parser.add_argument('--out', type=str, default=None)
     parser.add_argument(
         '--eval',
         type=str,
