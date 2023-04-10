@@ -214,7 +214,7 @@ def main():
         if args.refrain:
             refer_ignored = ~((refer_ann == cls_id) | (refer_ann == 0))
             refer_ann[refer_ignored] = 255
-        gray_ann = ann_reader(ann_path)
+        gray_ann = ann_reader(ann_path).astype(np.float32)
         gray_ann = resize_ndarray(gray_ann, size=refer_ann.shape, mode='bilinear')
         prob = gray_ann / 255.0
         # if abs(args.pre_power - 1.0) > 1e-7:
