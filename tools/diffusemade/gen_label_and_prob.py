@@ -82,9 +82,13 @@ def act_power(x, p=1.0):
     return np.power(x, p)
 
 
+def minmax_normalize(y):
+    return (y - np.min(y)) / (np.max(y) - np.min(y) + 1e-5)
+
+
 def act_tanh(x, mid=0.5, sat=4):
     y = 1 / (1 + np.exp(-2 * sat * (x - mid)))
-    return (y - np.min(y)) / (np.max(y) - np.min(y))
+    return minmax_normalize(y)
 
 
 def act_tanh2(x, mid=0.5, sat=4):
@@ -95,7 +99,7 @@ def act_tanh2(x, mid=0.5, sat=4):
     y = x.copy()
     y[up_idx] = 1 / (1 + np.exp(- (sat / up_range) * (x[up_idx] - mid)))
     y[lo_idx] = 1 / (1 + np.exp(- (sat / lo_range) * (x[lo_idx] - mid)))
-    return (y - np.min(y)) / (np.max(y) - np.min(y))
+    return minmax_normalize(y)
 
 
 def act_piece_wise(x, low, high):
@@ -161,7 +165,10 @@ def main():
         os.makedirs(out_ann_dir, exist_ok=True)
 
     os.makedirs(sta_dir, exist_ok=True)
-    sta_path = os.path.join(sta_dir, 'deeplabv3*.txt')
+    sta_name = 'deeplabv3'  # TODO: do not fix
+    if args.refrain:
+        sta_name += '*'
+    sta_path = os.path.join(sta_dir, sta_name + '.txt')
 
     cls_name2id = {}
     for id, name in enumerate(CLASSES):
