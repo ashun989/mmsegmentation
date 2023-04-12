@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 
 from ..builder import PIPELINES
+from mmseg.utils import parse_path
 
 
 @PIPELINES.register_module()
@@ -175,11 +176,13 @@ class LoadAnnotationWithProbs(object):
     """
 
     def __init__(self,
+                 prob_sub_dir='.',
+                 prob_suffix='_prob.npy',
                  reduce_zero_label=False):
-        # assert 0 < low_th < high_th < 1, f'0, {low_th}, {high_th}, 1'
+        self.prob_sub_dir = prob_sub_dir
+        self.prob_suffix = prob_suffix
         self.reduce_zero_label = reduce_zero_label
-        # self.low_th = low_th
-        # self.high_th = high_th
+    
 
     def __call__(self, results):
         """Call function to load multiple types annotations.
@@ -198,7 +201,10 @@ class LoadAnnotationWithProbs(object):
         else:
             filename = results['ann_info']['seg_map']
 
-        prob_filename = filename.replace('.png', '_prob.npy')
+        # prob_filename = filename.replace('.png', '_prob.npy')
+        ann_dir, ann_name, ann_ext = parse_path(filename)
+        prob_filename = osp.join(ann_dir, self.prob_sub_dir, ann_name + self.prob_suffix)
+
         gt_semantic_seg = cv2.imread(filename, 0)
         gt_semantic_prob = np.load(prob_filename)
 
