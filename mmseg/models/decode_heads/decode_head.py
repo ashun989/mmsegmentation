@@ -99,10 +99,11 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
 
         self.new_logit_and_prob_label_getter = None
         if self.use_prob is not None:
-            if self.use_prob['method'] == 'one_prob':
-                self.new_logit_and_prob_label_getter = self.get_new_logit_and_one_prob_label
-            elif self.use_prob['method'] == 'two_prob':
-                self.new_logit_and_prob_label_getter = self.get_new_logit_and_two_prob_label
+            # if self.use_prob['method'] == 'one_prob':
+            #     self.new_logit_and_prob_label_getter = self.get_new_logit_and_one_prob_label
+            # elif self.use_prob['method'] == 'two_prob':
+            #     self.new_logit_and_prob_label_getter = self.get_new_logit_and_two_prob_label
+            self.new_logit_and_prob_label_getter = getattr(self, f"get_new_logit_and_{self.use_prob['method']}_label")
 
 
         self.ignore_index = ignore_index
@@ -280,14 +281,18 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             feat = self.dropout(feat)
         output = self.conv_seg(feat)
         return output
-
-    def get_new_logit_and_one_prob_label(self, seg_logit, seg_label, prob_label):
+    
+    def _permute_and_reshape(self, seg_logit, seg_label, prob_label):
         B, C, H, W = seg_logit.shape
         useful_idx = seg_label != self.ignore_index
         useful_idx_1d = useful_idx.reshape(-1)
         seg_logit_1d = seg_logit.permute(0, 2, 3, 1).reshape(-1, C)[useful_idx_1d]
         seg_label_1d = seg_label.reshape(-1)[useful_idx_1d]
         prob_label_1d = prob_label.reshape(-1)[useful_idx_1d]
+        return seg_logit_1d, seg_label_1d, prob_label_1d, useful_idx_1d
+
+    def get_new_logit_and_one_prob_label(self, seg_logit, seg_label, prob_label):
+        seg_logit_1d, seg_label_1d, prob_label_1d, _ = self._permute_and_reshape(seg_logit, seg_label, prob_label)
 
         seg_label_p_1d = torch.zeros_like(seg_logit_1d, device=seg_logit_1d.device)
         all_idx = torch.arange(seg_logit_1d.shape[0], device=seg_logit_1d.device)
@@ -295,21 +300,43 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         return seg_logit_1d, seg_label_p_1d
 
     def get_new_logit_and_two_prob_label(self, seg_logit, seg_label, prob_label):
-        B, C, H, W = seg_logit.shape
-        useful_idx = seg_label != self.ignore_index
-        useful_idx_1d = useful_idx.reshape(-1)
-        seg_logit_1d = seg_logit.permute(0, 2, 3, 1).reshape(-1, C)[useful_idx_1d]
-        seg_label_1d = seg_label.reshape(-1)[useful_idx_1d]
-        prob_label_1d = prob_label.reshape(-1)[useful_idx_1d]
+        seg_logit_1d, seg_label_1d, prob_label_1d, _ = self._permute_and_reshape(seg_logit, seg_label, prob_label)
+
+        
 
         seg_label_p_1d = torch.zeros_like(seg_logit_1d, device=seg_logit_1d.device)
         all_idx = torch.arange(seg_logit_1d.shape[0], device=seg_logit_1d.device)
         fore_idx = seg_label_1d != 0
-        # back_idx = seg_logit_1d == 0
         seg_label_p_1d[all_idx, seg_label_1d] = prob_label_1d
         seg_label_p_1d[fore_idx, 0] = 1 - prob_label_1d[fore_idx]
-        # seg_label_p_1d[back_idx, seg_label_1d[]] = 1 - prob_label_1d[back_idx]
         return seg_logit_1d, seg_label_p_1d
+
+    def get_new_logit_and_full_prob_label(self, seg_logit, seg_label, prob_label):
+        seg_logit_1d, seg_label_1d, prob_label_1d, useful_idx_1d = self._permute_and_reshape(seg_logit, seg_label, prob_label)
+        
+        seg_label_arr = seg_label.detach().cpu().numpy()
+        batch_cls = np.zeros(seg_label.shape[0], dtype=np.uint8)
+        for batch_idx, b_seg_label in enumerate(seg_label_arr):
+            labels = np.unique(b_seg_label)
+            labels = set(labels)
+            labels -= {0, self.ignore_index}
+            if len(labels) == 1:
+                batch_cls[batch_idx] = list(labels)[0]
+        
+        batch_cls_1d = np.repeat(batch_cls, np.prod(seg_label.shape[1:]))
+        batch_cls_1d = torch.from_numpy(batch_cls_1d).to(device=seg_logit_1d.device)[useful_idx_1d]
+        seg_label_p_1d = torch.zeros_like(seg_logit_1d, device=seg_logit_1d.device)
+        all_idx = torch.arange(seg_logit_1d.shape[0], device=seg_logit_1d.device)
+        fore_idx = seg_label_1d != 0
+        back_idx = torch.where(seg_label_1d == 0)[0]
+        back_cls = batch_cls_1d[back_idx]
+        back_cls = back_cls.to(dtype=back_idx.dtype)  # IMPORTANT! uint8 to int64
+        seg_label_p_1d[all_idx, seg_label_1d] = prob_label_1d
+        seg_label_p_1d[fore_idx, 0] = 1 - prob_label_1d[fore_idx]
+        seg_label_p_1d[back_idx, back_cls] = 1 - prob_label_1d[back_idx] 
+        return seg_logit_1d, seg_label_p_1d
+
+
 
     @force_fp32(apply_to=('seg_logit',))
     def losses(self, seg_logit, seg_label):

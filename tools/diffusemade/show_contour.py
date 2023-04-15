@@ -20,12 +20,12 @@ def parse_args():
     parser.add_argument('--img-suffix', type=str, default='.png')
     parser.add_argument('--show-dir', type=str, default='work_dirs/show/dm3_pseudo_masks_aug')
     parser.add_argument('--ignore', type=int, default=255)
-    parser.add_argument('--n-jobs', type=int, default=None)
+    # parser.add_argument('--n-jobs', type=int, default=None)
     return parser.parse_args()
 
 
 def main():
-    n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
+    # n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
     img_dir = args.img
     ann_dir = args.ann
     assert os.path.isdir(img_dir)
@@ -48,7 +48,7 @@ def main():
         plt.figure()
         plt.contour(prob, levels=np.arange(0.1, 1.1, 0.1))
         plt.imshow(img)
-        # plt.show()
+        plt.axis('off')
         plt.savefig(show_path)
         plt.close()
 
