@@ -47,6 +47,25 @@ def print_results(results, cls_names, out_path=None):
             fp.write(out_str)
 
 
+def parse_refrain_info(dataset, refrain_info):
+    cls_names = None
+    if dataset == 'voc':
+        cls_names = VOC_CLASSES
+
+    name2cls = {}
+    if refrain_info is not None:
+        cls_name2id = {}
+        for id, name in enumerate(cls_names):
+            cls_name2id[name] = id
+        data_info_path = refrain_info
+        with open(data_info_path, 'r') as fp:
+            data_info = json.load(fp)
+        for di in data_info:
+            name2cls[int(di['img_index'])] = cls_name2id[di['concept']]
+
+    return cls_names, name2cls
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument('img', type=str, help='Path to Images')
@@ -89,21 +108,9 @@ def get_file_list(l1, label_suffix, split):
 def main():
     file_list = get_file_list(args.l1, args.label_suffix, args.split)
 
-    cls_names = None
-    if args.dataset == 'voc':
-        cls_names = VOC_CLASSES
-    num_classes = len(cls_names)
+    cls_names, name2cls = parse_refrain_info(args.dataset, args.refrain_info)
 
-    name2cls = {}
-    if args.refrain_info is not None:
-        cls_name2id = {}
-        for id, name in enumerate(cls_names):
-            cls_name2id[name] = id
-        data_info_path = args.refrain_info
-        with open(data_info_path, 'r') as fp:
-            data_info = json.load(fp)
-        for di in data_info:
-            name2cls[int(di['img_index'])] = cls_name2id[di['concept']]
+    num_classes = len(cls_names)
 
     def process(i):
         name = file_list[i]

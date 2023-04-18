@@ -9,7 +9,7 @@ import multiprocessing
 import numpy as np
 import cv2
 import torch.nn.functional as F
-from mmseg.core.evaluation.metrics import intersect_and_union, total_area_to_metrics, mean_iou
+from mmseg.core.evaluation.metrics import intersect_and_union, total_area_to_metrics
 
 import pydensecrf.densecrf as dcrf
 import pydensecrf.utils as utils
@@ -109,6 +109,14 @@ def act_piece_wise(x, low, high):
     return y
 
 
+def act_softmax(x, mid=0.5, temperature=1.0):
+    right_displace = mid - 0.5
+    x2 = x - right_displace
+    y = np.exp(x2 / temperature)  # element of y in [0, 1], so it is ok
+    z = np.exp((1 - x2) / temperature)
+    return y / (y + z)
+
+
 def read_gray(path):
     return cv2.imread(path, 0)
 
@@ -134,6 +142,9 @@ def main():
     elif args.pre_act == 'piece':
         exp_name0 = f'{args.pre_act}-{args.pre_low}-{args.pre_high}-{args.post}-{args.low}-{args.high}'
         pre_act = partial(act_piece_wise, low=args.pre_low, high=args.pre_high)
+    elif args.pre_act == 'softmax':
+        exp_name0 = f'{args.pre_act}-{args.pre_mid}-{args.pre_temp}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_softmax, mid=args.pre_mid, temperature=args.pre_temp)
     else:
         exp_name0 = f'{args.post}-{args.low}-{args.high}'
     # if args.test:
@@ -198,9 +209,7 @@ def main():
     num_classes = len(CLASSES)
 
     postprocess = None
-    if args.post == 'crf':
-        raise NotImplementedError()
-    elif args.post == 'dcrf':
+    if args.post == 'dcrf':
         postprocess = DenseCRF(iter_max=10,
                                pos_xy_std=1,  # 1
                                pos_w=3,
@@ -217,6 +226,8 @@ def main():
         refer_name = f"{di['img_index']:08}.png"
         ann_path = os.path.join(ann_dir, f"{di['img_index']:08}{args.ann_suffix}")
         refer_ann_path = os.path.join(refer_dir, refer_name)
+        assert os.path.isfile(ann_path), f"No such file: {ann_path}"
+        assert os.path.isfile(refer_ann_path), f"No such file: {refer_ann_path}"
         refer_ann = read_gray(refer_ann_path)
         if args.refrain:
             refer_ignored = ~((refer_ann == cls_id) | (refer_ann == 0))
@@ -309,15 +320,17 @@ def parse_args():
     parser.add_argument('--refrain', action='store_true')
     parser.add_argument('--low', type=float, default=0.08)
     parser.add_argument('--high', type=float, default=0.95)
-    parser.add_argument('--post', type=str, choices=['no', 'crf', 'dcrf'], default='dcrf')
+    parser.add_argument('--post', type=str, choices=['no', 'dcrf'], default='dcrf')
     parser.add_argument('--eval-only', action='store_true')
     # parser.add_argument('--power', type=float, default=1.0)
-    parser.add_argument('--pre-act', type=str, choices=['pow', 'tanh', 'tanh2', 'piece', 'no'], default='pow')
+    parser.add_argument('--pre-act', type=str, choices=['pow', 'tanh', 'tanh2', 'piece', 'softmax', 'no'],
+                        default='pow')
     parser.add_argument('--pre-power', type=float, default=1.0)
     parser.add_argument('--pre-mid', type=float, default=0.5)
     parser.add_argument('--pre-sat', type=float, default=4.0)
     parser.add_argument('--pre-low', type=float, default=0.25)
     parser.add_argument('--pre-high', type=float, default=0.75)
+    parser.add_argument('--pre-temp', type=float, default=1.0)
     parser.add_argument('--gen-prob', action='store_true')
     # parser.add_argument('--test', action='store_true')
     parser.add_argument('--show', action='store_true')
