@@ -7,7 +7,7 @@ import multiprocessing
 import joblib
 import numpy as np
 
-from compare_labels import get_file_list, parse_refrain_info
+from compare_labels import get_file_list, parse_refrain_info, reduce_zero_label
 from gen_label_and_prob import read_gray
 from clip_score import TopkClassIO
 
@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument('--seg-gt', type=str, default=None,
                         help='Path to gt ann directory, active if method is seg')
     parser.add_argument('--seg-suffix', type=str, default='.png')
-    parser.add_argument('--seg-th', type=float, default=0.20, help='Active if method is seg, default is 0.10')
+    parser.add_argument('--seg-th', type=float, default=0.20, help='Active if method is seg, default is 0.20')
     parser.add_argument('--seg-ignore', type=int, default=255)
     parser.add_argument('--seg-key', type=str, default='IoU',
                         choices=['IoU', 'Fscore', 'Dice', 'Acc', 'Precision', 'Recall'])
@@ -36,8 +36,8 @@ def parse_args():
                         help='Path to class label file, active if method is cls')
     parser.add_argument('--cls-topk', type=int, default=1, help='Active if method is cls, default is 1')
 
-    parser.add_argument('--dataset', type=str, default='voc', choices=['voc'])
-    parser.add_argument('--data-info', type=str, default=None, required=True)
+    parser.add_argument('--dataset', type=str, default='voc', choices=['voc', 'ade'])
+    parser.add_argument('--data-info', type=str, default=None)
     parser.add_argument('--out', type=str, default=None, help='Path to output directory')
 
     parser.add_argument('--n-jobs', type=int, default=None)
@@ -50,6 +50,10 @@ def seg_filter(file_list):
     assert args.num_bad is not None or args.seg_th is not None
 
     cls_names, name2cls = parse_refrain_info(args.dataset, args.data_info)
+    reduce_zero = False
+    if cls_names == 'ade':
+        assert args.seg_ignore == 255
+        reduce_zero = True
     num_classes = len(cls_names)
 
     def process(i):
@@ -58,6 +62,9 @@ def seg_filter(file_list):
         gt_path = osp.join(args.seg_gt, name + args.seg_suffix)
         pred = read_gray(pred_path)
         gt = read_gray(gt_path)
+        if reduce_zero:
+            pred = reduce_zero_label(pred)
+            gt = reduce_zero_label(gt)
         if name2cls:
             cls_id = name2cls[int(name)]
             gt_ignored = ~((gt == cls_id) | (gt == 0))

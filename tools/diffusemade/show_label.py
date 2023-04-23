@@ -5,18 +5,22 @@ import cv2
 import joblib
 import multiprocessing
 
-from compare_labels import get_file_list
+from mmseg.datasets.voc import PascalVOCDataset
+from mmseg.datasets.ade import ADE20KDataset
 
-CLASSES = ('background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
-           'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog',
-           'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
-           'train', 'tvmonitor')
+from compare_labels import get_file_list, reduce_zero_label
 
-PALETTE = [[0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0], [0, 0, 128],
-           [128, 0, 128], [0, 128, 128], [128, 128, 128], [64, 0, 0],
-           [192, 0, 0], [64, 128, 0], [192, 128, 0], [64, 0, 128],
-           [192, 0, 128], [64, 128, 128], [192, 128, 128], [0, 64, 0],
-           [128, 64, 0], [0, 192, 0], [128, 192, 0], [0, 64, 128]]
+
+# VOC_CLASSES = ('background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
+#                'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog',
+#                'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
+#                'train', 'tvmonitor')
+#
+# VOC_PALETTE = [[0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0], [0, 0, 128],
+#                [128, 0, 128], [0, 128, 128], [128, 128, 128], [64, 0, 0],
+#                [192, 0, 0], [64, 128, 0], [192, 128, 0], [64, 0, 128],
+#                [192, 0, 128], [64, 128, 128], [192, 128, 128], [0, 64, 0],
+#                [128, 64, 0], [0, 192, 0], [128, 192, 0], [0, 64, 128]]
 
 
 def main():
@@ -27,7 +31,18 @@ def main():
     assert os.path.isdir(ann_dir)
     file_list = get_file_list(ann_dir, args.ann_suffix, args.split)
 
-    palette = np.array(PALETTE)
+    reduce_zero = False
+    if args.dataset == 'voc':
+        palette = np.array(PascalVOCDataset.PALETTE)
+    elif args.dataset == 'ade':
+        palette = np.array(ADE20KDataset.PALETTE)
+        reduce_zero = True
+    else:
+        raise NotImplementedError()
+
+    if reduce_zero:
+        assert args.ignore == 255
+
     show_dir = args.show_dir
     os.makedirs(show_dir, exist_ok=True)
 
@@ -37,6 +52,8 @@ def main():
         # pid = f"{di['img_index']:05}"
         label_path = os.path.join(ann_dir, name + args.ann_suffix)
         label = cv2.imread(label_path, 0)
+        if reduce_zero:
+            label = reduce_zero_label(label)
         is_ignore = label == args.ignore
         label[is_ignore] = 0
         show_map = palette[label]
@@ -48,11 +65,15 @@ def main():
         img = img[:, :, ::-1]  # RGB to BGR
         cv2.imwrite(show_path, img)
 
-    joblib.Parallel(n_jobs=n_jobs,
-                    verbose=100,
-                    pre_dispatch='all')(
-        [joblib.delayed(process)(i) for i in range(len(file_list))]
-    )
+    if n_jobs > 1:
+        joblib.Parallel(n_jobs=n_jobs,
+                        verbose=100,
+                        pre_dispatch='all')(
+            [joblib.delayed(process)(i) for i in range(len(file_list))]
+        )
+
+    for i in range(len(file_list)):
+        process(i)
 
 
 def parse_args():
@@ -65,6 +86,7 @@ def parse_args():
     parser.add_argument('--show-dir', type=str, default='work_dirs/show/dm3_pseudo_masks_aug')
     parser.add_argument('--ignore', type=int, default=255)
     parser.add_argument('--n-jobs', type=int, default=None)
+    parser.add_argument('--dataset', type=str, default='voc', choices=['voc', 'ade'])
     return parser.parse_args()
 
 

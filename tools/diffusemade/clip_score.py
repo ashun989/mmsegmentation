@@ -11,11 +11,11 @@ import nltk
 
 from mmseg.utils import parse_path
 
-from compare_labels import VOC_CLASSES
+from mmseg.datasets import PascalVOCDataset
 
 VOC_SYNONYMS = (
     [],
-    ['aeroplanes', 'seaplane', 'lane'],
+    ['aeroplanes', 'seaplane'],
     ['bicycles'],
     ['birds'],
     ['boats', 'rowboat', 'sailboat', 'motorboat', 'speedboat', 'houseboat'],
@@ -164,7 +164,7 @@ def main():
         data_info = json.load(fp)
 
     cname2idx = {}
-    for idx, name in enumerate(VOC_CLASSES):
+    for idx, name in enumerate(PascalVOCDataset.CLASSES):
         cname2idx[name] = idx
 
     os.makedirs(args.out, exist_ok=True)
@@ -184,7 +184,7 @@ def main():
 
         prompts = entity_replace(prompt, cid, VOC_CLASSES, VOC_SYNONYMS, VOC_2GRAM)
         if not prompts:
-            # breakpoint()
+            topk_writer.write_line(name, [0] * 5)
             undeal_writer.write(f"{name},{cls_name},{prompt}\n")
             continue
         img_path = osp.join(args.img, name + args.img_suffix)

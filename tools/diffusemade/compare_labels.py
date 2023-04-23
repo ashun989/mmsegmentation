@@ -8,18 +8,23 @@ import joblib
 import torch
 import numpy as np
 from mmseg.core.evaluation.metrics import intersect_and_union, total_area_to_metrics
-
-VOC_CLASSES = ('background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
-               'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog',
-               'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
-               'train', 'tvmonitor')
+from mmseg.datasets import ADE20KDataset, PascalVOCDataset
 
 
-def print_results(results, cls_names, out_path=None):
+def reduce_zero_label(gt_semantic_seg):
+    # avoid using underflow conversion
+    gt_semantic_seg[gt_semantic_seg == 0] = 255
+    gt_semantic_seg = gt_semantic_seg - 1
+    gt_semantic_seg[gt_semantic_seg == 254] = 255
+    return gt_semantic_seg
+
+
+def print_results(results, cls_names, out_path=None, reduce_zero=False):
     aAcc = results.pop('aAcc')
     out_str = ""
     eval_keys = results.keys()
     out_str += f"{'ID':<5}{'Name':<15}"
+    beg_cid = 1 if reduce_zero else 0
     for i, k in enumerate(eval_keys):
         # if i == len(eval_keys) - 1:
         out_str += f"{k:<10}"
@@ -27,7 +32,7 @@ def print_results(results, cls_names, out_path=None):
         #     out_str += f"{k:<10},"
     out_str += "\n"
     for cid, cname in enumerate(cls_names):
-        out_str += f"{cid:<5}{cname:<15}"
+        out_str += f"{cid + beg_cid:<5}{cname:<15}"
         for k in eval_keys:
             if k[:4] == 'Area':
                 out_str += f"{results[k][cid] * 100:<10.2e}"
@@ -50,8 +55,11 @@ def print_results(results, cls_names, out_path=None):
 def parse_refrain_info(dataset, refrain_info):
     cls_names = None
     if dataset == 'voc':
-        cls_names = VOC_CLASSES
-
+        cls_names = PascalVOCDataset.CLASSES
+    elif dataset == 'ade':
+        cls_names = ADE20KDataset.CLASSES
+    else:
+        raise NotImplementedError()
     name2cls = {}
     if refrain_info is not None:
         cls_name2id = {}
@@ -78,7 +86,7 @@ def parse_args():
     parser.add_argument('--ignore', type=int, default=255)
     parser.add_argument('--n-jobs', type=int, default=None)
     parser.add_argument('--out', type=str, default=None)
-    parser.add_argument('--dataset', type=str, default='voc', choices=['voc'])
+    parser.add_argument('--dataset', type=str, default='voc', choices=['voc', 'ade'])
     parser.add_argument(
         '--eval',
         type=str,
@@ -110,6 +118,11 @@ def main():
 
     cls_names, name2cls = parse_refrain_info(args.dataset, args.refrain_info)
 
+    reduce_zero = False
+    if args.dataset == 'ade':
+        reduce_zero = True
+        assert args.ignore == 255
+
     num_classes = len(cls_names)
 
     def process(i):
@@ -118,6 +131,9 @@ def main():
         l2_path = osp.join(args.l2, name + args.label_suffix)
         l1 = cv2.imread(l1_path, 0)
         l2 = cv2.imread(l2_path, 0)
+        if reduce_zero:
+            l1 = reduce_zero_label(l1)
+            l2 = reduce_zero_label(l2)
         if name2cls:
             cls_id = name2cls[int(name)]
             refer_ignored = ~((l2 == cls_id) | (l2 == 0))
@@ -149,7 +165,7 @@ def main():
     results['Area_u'] = total_au.numpy()
     results['Area_l1'] = total_ap.numpy()
     results['Area_l2'] = total_al.numpy()
-    print_results(results, cls_names, args.out)
+    print_results(results, cls_names, args.out, reduce_zero)
 
 
 if __name__ == '__main__':
