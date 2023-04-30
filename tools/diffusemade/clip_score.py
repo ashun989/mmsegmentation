@@ -5,11 +5,12 @@ import os.path as osp
 from abc import ABC, abstractmethod
 
 import clip
+import blip
 import cv2
 import nltk
 import numpy as np
 import torch
-import torchvision.transforms.functional
+import torchvision
 from PIL import Image
 from tqdm import tqdm
 
@@ -175,10 +176,12 @@ def parse_args():
     parser.add_argument('--data-info', type=str, required=True, help='Path to data infos')
     parser.add_argument('--img-suffix', type=str, default='.png')
     parser.add_argument('--ann-suffix', type=str, default='.png')
+    parser.add_argument('--model', type=str, default='blip', choices=['clip', 'blip'])
     parser.add_argument('--out', type=str, required=True, help='dir to output files')
     parser.add_argument('--text-method', type=str, default='fix', choices=['ori', 'fix'])
     parser.add_argument('--img-method', type=str, default='whole', choices=['whole', 'boxes'])
-    # parser.add_argument('--topk', type=int, default=10)
+    parser.add_argument('--topk', type=int, default=20)
+    parser.add_argument('--box-method', type=str, choices=['nms', 'single', 'max'], default='nms')
     return parser.parse_args()
 
 
@@ -219,7 +222,6 @@ def zeroshot_classifier(model, classnames, templates):
         zeroshot_weights = []
         for classname in tqdm(classnames):
             texts = [template.format(classname) for template in templates]  # format with class
-            texts = clip.tokenize(texts).cuda()  # tokenize
             class_embeddings = model.encode_text(texts)  # embed with text encoder
             class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
             class_embedding = class_embeddings.mean(dim=0)
@@ -254,18 +256,6 @@ class TopkClassIO:
                 name = tmp_dict.pop('name')
                 results[name] = tmp_dict
         return results
-
-    # def close(self):
-    #     self.fp.close()
-
-
-class TextFeatureBase(ABC):
-    def __init__(self, model):
-        self.model = model
-
-    @abstractmethod
-    def get_text_feature(self, *data_args, **data_kwargs):
-        pass
 
 
 def ann2box(ann, multi_contour_eval=True):
@@ -323,10 +313,57 @@ def nms_boxes(boxes, min_area=0):
     return rtn_boxes
 
 
+def combine_boxes(boxes):
+    xAs, yAs, xBs, yBs = zip(*boxes)
+    xA = min(xAs)
+    yA = min(yAs)
+    xB = max(xBs)
+    yB = max(yBs)
+    return [(xA, yA, xB, yB)]
+
+
+class ModelAdapter:
+    def __init__(self, model_type='clip'):
+        self.is_clip = False
+        if model_type == 'clip':
+            self.model, self.preprocess = clip.load('ViT-L/14@336px')
+            self.model.cuda().eval()
+            self.is_clip = True
+        else:
+            image_size = 384
+            model_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_large_retrieval_coco.pth"
+            self.model = blip.models.blip_itm.blip_itm(pretrained=model_url, image_size=image_size, vit='large',
+                                                       med_config='/home/ashun/Projects/BLIP/configs/med_config.json')
+            self.model.cuda().eval()
+            self.preprocess = torchvision.transforms.Compose([
+                torchvision.transforms.Resize((image_size, image_size),
+                                              interpolation=torchvision.transforms.InterpolationMode.BICUBIC),
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize((0.48145466, 0.4578275, 0.40821073),
+                                                 (0.26862954, 0.26130258, 0.27577711))
+            ])
+
+    def encode_image(self, image):
+        if self.is_clip:
+            return self.model.encode_image(image)
+        image_embeds = self.model.visual_encoder(image)
+        return self.model.vision_proj(image_embeds[:, 0, :])
+
+    def encode_text(self, text):
+        if self.is_clip:
+            text_tokens = clip.tokenize(text).cuda()
+            return self.model.encode_text(text_tokens)
+        text_tokens = self.model.tokenizer(text, padding='max_length', truncation=True, max_length=35,
+                                           return_tensors="pt").to("cuda")
+        text_output = self.model.text_encoder(text_tokens.input_ids, attention_mask=text_tokens.attention_mask,
+                                              return_dict=True, mode='text')
+        return self.model.text_proj(text_output.last_hidden_state[:, 0, :])
+
+
 class ImageFeatureBase(ABC):
-    def __init__(self, model, preprocess):
+    def __init__(self, model: ModelAdapter):
         self.model = model
-        self.preprocess = preprocess
+        self.preprocess = self.model.preprocess
 
     @abstractmethod
     def get_img_feature(self, img_path, ann_path):
@@ -334,13 +371,12 @@ class ImageFeatureBase(ABC):
 
 
 class ImageFeatureWhole(ImageFeatureBase):
-    def __init__(self, model, preprocess):
-        super(ImageFeatureWhole, self).__init__(model, preprocess)
+    def __init__(self, model: ModelAdapter):
+        super(ImageFeatureWhole, self).__init__(model)
 
     def get_img_feature(self, img_path, ann_path):
         img = Image.open(img_path).convert("RGB")
-        img = self.preprocess(img)
-        image_input = torch.tensor(np.stack([img])).cuda()
+        image_input = self.preprocess(img).unsqueeze(0).cuda()
         with torch.no_grad():
             image_features = self.model.encode_image(image_input)
         image_features /= image_features.norm(dim=-1, keepdim=True)
@@ -348,16 +384,24 @@ class ImageFeatureWhole(ImageFeatureBase):
 
 
 class ImageFeatureBoxes(ImageFeatureBase):
-    def __init__(self, model, preprocess):
-        super(ImageFeatureBoxes, self).__init__(model, preprocess)
+    def __init__(self, model: ModelAdapter, box_method='nms'):
+        super(ImageFeatureBoxes, self).__init__(model)
+        assert box_method in ['nms', 'single', 'max']
+        self.box_method = box_method
 
     def get_img_feature(self, img_path, ann_path):
         assert ann_path is not None and osp.isfile(ann_path), f"No such file: {ann_path}"
         img = Image.open(img_path).convert("RGB")
         ann = read_gray(ann_path)
-        boxes = ann2box(ann, multi_contour_eval=True)
-        boxes = nms_boxes(boxes, min_area=16 ** 2)
-        if not boxes:
+        if self.box_method == 'nms':
+            boxes = ann2box(ann, multi_contour_eval=True)
+            boxes = nms_boxes(boxes, min_area=16 ** 2)
+        elif self.box_method == 'single':
+            boxes = ann2box(ann, multi_contour_eval=False)
+        else:
+            boxes = ann2box(ann, multi_contour_eval=True)
+            boxes = combine_boxes(boxes)
+        if not boxes or box_area(boxes[0]) == 0:
             return None
         imgs = []
         for b in boxes:
@@ -369,6 +413,15 @@ class ImageFeatureBoxes(ImageFeatureBase):
             image_features = self.model.encode_image(image_input)
         image_features /= image_features.norm(dim=-1, keepdim=True)
         return image_features  # (N, D)
+
+
+class TextFeatureBase(ABC):
+    def __init__(self, model):
+        self.model = model
+
+    @abstractmethod
+    def get_text_feature(self, *data_args, **data_kwargs):
+        pass
 
 
 class TextFeatureByOrigin(TextFeatureBase):
@@ -393,11 +446,10 @@ class TextFeatureByOrigin(TextFeatureBase):
             with open(self.undeal_path, write_mode) as undeal_writer:
                 undeal_writer.write(f"{img_name},{cls_name},{prompt}\n")
             return None
-        text_tokens = clip.tokenize(fg_bg_prompts).cuda()
         with torch.no_grad():
-            text_features = self.model.encode_text(text_tokens)
+            text_features = self.model.encode_text(fg_bg_prompts)
         text_features /= text_features.norm(dim=-1, keepdim=True)
-        return text_features  # (#fg+#bg, D)
+        return text_features
 
 
 class TextFeatureFixed(TextFeatureBase):
@@ -424,8 +476,9 @@ def main():
     for i, c in enumerate(VOC_NEW + VOC_BACKGROUND_CATEGORY, 1):
         print(f"{i:03}: {c}")
 
-    model, preprocess = clip.load("ViT-L/14@336px")
-    model.cuda().eval()
+    # model, preprocess = clip.load("ViT-L/14@336px")
+    # model.cuda().eval()
+    model = ModelAdapter(args.model)
 
     if args.text_method == 'ori':
         text_feature_getter = TextFeatureByOrigin(model, args.out)
@@ -433,9 +486,9 @@ def main():
         text_feature_getter = TextFeatureFixed(model)
 
     if args.img_method == 'whole':
-        img_feature_getter = ImageFeatureWhole(model, preprocess)
+        img_feature_getter = ImageFeatureWhole(model)
     else:
-        img_feature_getter = ImageFeatureBoxes(model, preprocess)
+        img_feature_getter = ImageFeatureBoxes(model, box_method=args.box_method)
 
     with open(args.data_info, 'r') as fp:
         data_info = json.load(fp)
@@ -444,7 +497,7 @@ def main():
     for idx, name in enumerate(PascalVOCDataset.CLASSES):
         cname2idx[name] = idx
 
-    out_path = osp.join(args.out, "clip_index.json")
+    out_path = osp.join(args.out, "cls_score.json")
     topk_writer = TopkClassIO(out_path)
 
     for di in tqdm(data_info):
