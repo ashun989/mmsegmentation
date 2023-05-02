@@ -26,7 +26,7 @@ def standardization(x):
 
 
 def scale_up(x):
-    y = (x - np.min(x)) / (np.max(x) - np.min(x))
+    y = (x - np.min(x)) / (np.max(x) - np.min(x) + 1e-5)
     return y * 255
 
 
