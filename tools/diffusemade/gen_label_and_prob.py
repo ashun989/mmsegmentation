@@ -102,6 +102,44 @@ def act_tanh2(x, mid=0.5, sat=4):
     return minmax_normalize(y)
 
 
+def edge2positions(bin_edges):
+    positions = []
+    for i in range(len(bin_edges) - 1):
+        positions.append((bin_edges[i] + bin_edges[i + 1]) / 2)
+    return positions
+
+
+def find_crests(hist, positions, window_size=0.1, is_trough=False, threshold=1000):
+    crests = []
+    crest_positions = []
+    removed = [False] * len(hist)
+    sorted_hist, sorted_positions = list(zip(*sorted(zip(hist, positions), key=lambda a: a[0], reverse=not is_trough)))
+    for i in range(len(sorted_hist)):
+        if len(crests) and (is_trough) ^ (sorted_hist[i] - threshold < 0):
+            break
+        if not removed[i]:
+            crests.append(sorted_hist[i])
+            crest_positions.append(sorted_positions[i])
+            for j in range(i + 1, len(sorted_hist)):
+                if abs(sorted_positions[j] - sorted_positions[i]) < window_size:
+                    removed[j] = True
+    return crests, crest_positions
+
+
+def act_trough(x, win_size=0.1, th=1000, sat=4):
+    hist, bin_edges = np.histogram(x, bins=100, range=(0, 1))
+    positions = edge2positions(bin_edges)
+    crest_positions = find_crests(hist, positions, win_size, is_trough=False, threshold=th)[1]
+    trough_positions = find_crests(hist, positions, win_size, is_trough=True, threshold=th)[1]
+    first_crest = min(crest_positions)
+    mid = min(trough_positions)
+    for p in sorted(trough_positions):
+        if p > first_crest:
+            mid = p
+            break
+    return act_tanh2(x, mid, sat)
+
+
 def act_piece_wise(x, low, high):
     y = x.copy()
     y[y < low] = 0
@@ -115,6 +153,11 @@ def act_softmax(x, mid=0.5, temperature=1.0):
     y = np.exp(x2 / temperature)  # element of y in [0, 1], so it is ok
     z = np.exp((1 - x2) / temperature)
     return y / (y + z)
+
+
+def act_he(x, sat=4):
+    x2 = cv2.equalizeHist((x * 255).astype(np.uint8)) / 255
+    return act_tanh2(x2, 0.5, sat)
 
 
 def read_gray(path):
@@ -145,6 +188,12 @@ def main():
     elif args.pre_act == 'softmax':
         exp_name0 = f'{args.pre_act}-{args.pre_mid}-{args.pre_temp}-{args.post}-{args.low}-{args.high}'
         pre_act = partial(act_softmax, mid=args.pre_mid, temperature=args.pre_temp)
+    elif args.pre_act == 'trough':
+        exp_name0 = f'{args.pre_act}-{args.pre_win}-{args.pre_th}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_trough, win_size=args.pre_win, sat=args.pre_sat, th=args.pre_th)
+    elif args.pre_act == 'he':
+        exp_name0 = f'{args.pre_act}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_he, sat=args.pre_sat)
     else:
         exp_name0 = f'{args.post}-{args.low}-{args.high}'
     # if args.test:
@@ -318,12 +367,13 @@ def parse_args():
     parser.add_argument('--img-suffix', type=str, default='.png')
 
     parser.add_argument('--refrain', action='store_true')
-    parser.add_argument('--low', type=float, default=0.08)
+    parser.add_argument('--low', type=float, default=0.05)
     parser.add_argument('--high', type=float, default=0.95)
     parser.add_argument('--post', type=str, choices=['no', 'dcrf'], default='dcrf')
     parser.add_argument('--eval-only', action='store_true')
     # parser.add_argument('--power', type=float, default=1.0)
-    parser.add_argument('--pre-act', type=str, choices=['pow', 'tanh', 'tanh2', 'piece', 'softmax', 'no'],
+    parser.add_argument('--pre-act', type=str,
+                        choices=['pow', 'tanh', 'tanh2', 'piece', 'softmax', 'he', 'trough', 'no'],
                         default='pow')
     parser.add_argument('--pre-power', type=float, default=1.0)
     parser.add_argument('--pre-mid', type=float, default=0.5)
@@ -331,6 +381,8 @@ def parse_args():
     parser.add_argument('--pre-low', type=float, default=0.25)
     parser.add_argument('--pre-high', type=float, default=0.75)
     parser.add_argument('--pre-temp', type=float, default=1.0)
+    parser.add_argument('--pre-win', type=float, default=0.2)
+    parser.add_argument('--pre-th', type=float, default=5000)
     parser.add_argument('--gen-prob', action='store_true')
     # parser.add_argument('--test', action='store_true')
     parser.add_argument('--show', action='store_true')
