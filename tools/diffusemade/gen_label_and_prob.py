@@ -15,8 +15,11 @@ import pydensecrf.densecrf as dcrf
 import pydensecrf.utils as utils
 
 from functools import partial
+from enum import Enum
 
-from compare_labels import print_results
+from compare_labels import print_results, get_file_list
+
+import matplotlib.pyplot as plt
 
 CLASSES = ('background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
            'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog',
@@ -110,33 +113,150 @@ def edge2positions(bin_edges):
 
 
 def find_crests(hist, positions, window_size=0.1, is_trough=False, threshold=1000):
+    """
+
+    Args:
+        hist:
+        positions:
+        window_size:
+        is_trough:
+        threshold:
+
+    Returns: At least one crest/trough is returned.
+
+    """
     crests = []
     crest_positions = []
     removed = [False] * len(hist)
     sorted_hist, sorted_positions = list(zip(*sorted(zip(hist, positions), key=lambda a: a[0], reverse=not is_trough)))
     for i in range(len(sorted_hist)):
-        if len(crests) and (is_trough) ^ (sorted_hist[i] - threshold < 0):
+        if threshold is not None and len(crests) and (is_trough) ^ (sorted_hist[i] - threshold < 0):
             break
         if not removed[i]:
             crests.append(sorted_hist[i])
             crest_positions.append(sorted_positions[i])
             for j in range(i + 1, len(sorted_hist)):
-                if abs(sorted_positions[j] - sorted_positions[i]) < window_size:
+                if not removed[j] and abs(sorted_positions[j] - sorted_positions[i]) < window_size:
                     removed[j] = True
     return crests, crest_positions
 
 
-def act_trough(x, win_size=0.1, th=1000, sat=4):
+def act_trough(x, win_size=0.1, th=1000, sat=4, debug=False):
     hist, bin_edges = np.histogram(x, bins=100, range=(0, 1))
     positions = edge2positions(bin_edges)
-    crest_positions = find_crests(hist, positions, win_size, is_trough=False, threshold=th)[1]
-    trough_positions = find_crests(hist, positions, win_size, is_trough=True, threshold=th)[1]
+    crests, crest_positions = find_crests(hist, positions, win_size, is_trough=False, threshold=th)
+    troughs, trough_positions = find_crests(hist, positions, win_size, is_trough=True, threshold=th)
     first_crest = min(crest_positions)
     mid = min(trough_positions)
     for p in sorted(trough_positions):
         if p > first_crest:
             mid = p
             break
+    if debug:
+        return act_tanh2(x, mid, sat), (hist, bin_edges), (crest_positions, crests), (trough_positions, troughs), mid
+    return act_tanh2(x, mid, sat)
+
+
+class TroughType(Enum):
+    T01 = 1,
+    T10 = 10,
+    T101 = 101
+
+
+def find_basin(merged_code):
+    assert 0 < sum(merged_code) < len(merged_code)  # 0+ and 1+ is impossible
+    id1 = 0
+    id2 = 0
+    trough_type = TroughType.T101
+    for i in range(len(merged_code) - 1):
+        if merged_code[i] > merged_code[i + 1]:
+            id1 = i + 1
+            break
+    if id1 > 0:
+        # 1+0+ or 1+0+1+
+        find_mode101 = False
+        for i in range(id1 + 1, len(merged_code)):
+            if merged_code[i] == 1:
+                id2 = i - 1
+                find_mode101 = True
+                trough_type = TroughType.T101
+                break
+        if not find_mode101:
+            id2 = len(merged_code) - 1
+            trough_type = TroughType.T10
+    else:
+        # 0+1+
+        trough_type = TroughType.T01
+        for i in range(id1 + 1, len(merged_code)):
+            if merged_code[i] == 1:
+                id2 = i - 1
+                break
+    return id1, id2, trough_type
+
+
+def get_first_trough_range(sorted_crest_positions, sorted_trough_positions):
+    """
+    Find the sequence in the `merged_code` that matches the regular expression `10+1`.
+
+    Args:
+        sorted_crest_positions:
+        sorted_trough_positions:
+
+    Returns:
+
+    """
+
+    merged_code = [0] * (len(sorted_crest_positions) + len(sorted_trough_positions))
+    merged_idx = [0] * (len(sorted_crest_positions) + len(sorted_trough_positions))
+    cid = 0
+    tid = 0
+    mid = 0
+    while cid < len(sorted_crest_positions) and tid < len(sorted_trough_positions):
+        if sorted_crest_positions[cid] < sorted_trough_positions[tid]:
+            merged_code[mid] = 1
+            merged_idx[mid] = cid
+            cid += 1
+        else:
+            merged_code[mid] = 0
+            merged_idx[mid] = tid
+            tid += 1
+        mid += 1
+    while cid < len(sorted_crest_positions):
+        merged_idx[mid] = cid
+        mid += 1
+        cid += 1
+    while tid < len(sorted_trough_positions):
+        merged_idx[mid] = tid
+        mid += 1
+        tid += 1
+    # print(merged_code)
+    # print(merged_idx)
+    id1, id2, trough_type = find_basin(merged_code)
+    trough_idx1 = merged_idx[id1]
+    trough_idx2 = merged_idx[id2]
+    return trough_idx1, trough_idx2, trough_type
+
+
+def act_trough2(x, win_size=0.2, th=5000, sat=4, debug=False):
+    hist, bin_edges = np.histogram(x, bins=100, range=(0, 1))
+    positions = edge2positions(bin_edges)
+    troughs, trough_positions = find_crests(hist, positions, win_size, is_trough=True, threshold=th)
+    crests, crest_positions = find_crests(hist, positions, win_size, is_trough=False, threshold=max(troughs))
+    sorted_crest_positions = sorted(crest_positions)
+    sorted_trough_positions = sorted(trough_positions)
+    trough_idx1, trough_idx2, trough_type = get_first_trough_range(sorted_crest_positions, sorted_trough_positions)
+    # print(f"trough_idx1={trough_idx1}, trough_idx2={trough_idx2}, trough_type={trough_type}")
+    first_trough_positions = sorted_trough_positions[
+                             trough_idx1:trough_idx2 + 1]
+    if trough_type == TroughType.T10:
+        mid = first_trough_positions[0]
+    elif trough_type == TroughType.T101:
+        mid = 0.5 * (first_trough_positions[0] + first_trough_positions[-1])
+    else:
+        mid = first_trough_positions[-1]
+    if debug:
+        return act_tanh2(x, mid, sat), (hist, bin_edges), (crest_positions, crests), (
+            trough_positions, troughs), mid, first_trough_positions
     return act_tanh2(x, mid, sat)
 
 
@@ -168,6 +288,29 @@ def read_npy(path):
     return np.load(path)
 
 
+def show_prob(prob):
+    plt.imshow(prob, cmap="gray", vmin=0, vmax=1)
+    plt.show()
+
+
+def show_hist(hist_info, crest_info, trough_info, mid, part_trough_positions, th):
+    # hist, bin_edges = np.histogram(prob, bins=100, range=(0, 1))
+    # positions = edge2positions(bin_edges)
+    # crests, crest_positions = find_crests(hist, positions, window_size=win_size, is_trough=False, threshold=th)
+    # troughs, trough_positions = find_crests(hist, positions, window_size=win_size, is_trough=True, threshold=th)
+    plt.stairs(*hist_info)
+    plt.scatter(*crest_info, label='crest')
+    plt.scatter(*trough_info, label='trough')
+    plt.axvline(mid, ls='--')
+    if part_trough_positions is not None:
+        plt.axvline(part_trough_positions[0], ls=':')
+        plt.axvline(part_trough_positions[-1], ls=':')
+    if th is not None:
+        plt.axhline(th)
+    plt.legend()
+    plt.show()
+
+
 def main():
     n_jobs = multiprocessing.cpu_count() if args.n_jobs is None else args.n_jobs
     print(f"#jobs: {n_jobs}")
@@ -191,6 +334,9 @@ def main():
     elif args.pre_act == 'trough':
         exp_name0 = f'{args.pre_act}-{args.pre_win}-{args.pre_th}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
         pre_act = partial(act_trough, win_size=args.pre_win, sat=args.pre_sat, th=args.pre_th)
+    elif args.pre_act == 'trough2':
+        exp_name0 = f'{args.pre_act}-{args.pre_win}-{args.pre_th}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
+        pre_act = partial(act_trough2, win_size=args.pre_win, sat=args.pre_sat, th=args.pre_th)
     elif args.pre_act == 'he':
         exp_name0 = f'{args.pre_act}-{args.pre_sat}-{args.post}-{args.low}-{args.high}'
         pre_act = partial(act_he, sat=args.pre_sat)
@@ -255,6 +401,8 @@ def main():
     with open(data_info_path, 'r') as fp:
         data_info = json.load(fp)
 
+    file_list = get_file_list(img_dir, args.img_suffix, args.split)
+
     num_classes = len(CLASSES)
 
     postprocess = None
@@ -270,10 +418,13 @@ def main():
     assert metrics is not None
 
     def process(i):
-        di = data_info[i]
+        name = file_list[i]
+        img_id = int(name)
+        di = data_info[img_id]
+        assert img_id == di['img_index']
         cls_id = cls_name2id[di['concept']]
-        refer_name = f"{di['img_index']:08}.png"
-        ann_path = os.path.join(ann_dir, f"{di['img_index']:08}{args.ann_suffix}")
+        refer_name = f"{name}.png"
+        ann_path = os.path.join(ann_dir, f"{name}{args.ann_suffix}")
         refer_ann_path = os.path.join(refer_dir, refer_name)
         assert os.path.isfile(ann_path), f"No such file: {ann_path}"
         assert os.path.isfile(refer_ann_path), f"No such file: {refer_ann_path}"
@@ -284,9 +435,10 @@ def main():
         gray_ann = ann_reader(ann_path).astype(np.float32)
         gray_ann = resize_ndarray(gray_ann, size=refer_ann.shape, mode='bilinear')
         prob = gray_ann / 255.0
-        # if abs(args.pre_power - 1.0) > 1e-7:
+
         if pre_act is not None:
             prob = pre_act(prob)
+
         if postprocess is not None:
             prob = np.stack([1 - prob, prob], axis=0)
             img_path = os.path.join(img_dir, f"{di['img_index']:08}{args.img_suffix}")
@@ -336,10 +488,10 @@ def main():
         areas = joblib.Parallel(n_jobs=n_jobs,
                                 verbose=100,
                                 pre_dispatch='all')(
-            [joblib.delayed(process)(i) for i in range(len(data_info))]
+            [joblib.delayed(process)(i) for i in range(len(file_list))]
         )
     else:
-        areas = [process(i) for i in range(len(data_info))]
+        areas = [process(i) for i in range(len(file_list))]
 
     ais, aus, aps, als = zip(*areas)
     total_ai = torch.sum(torch.stack(ais, dim=0), dim=0)
@@ -363,6 +515,8 @@ def parse_args():
     parser.add_argument('--out-dir', type=str, default='.')
     parser.add_argument('--refer', type=str, default='deeplabv3-r50-d8_512x512_40k')
 
+    parser.add_argument('--split', type=str, default=None)
+
     parser.add_argument('--ann-suffix', type=str, default='.png', choices=['.png', '.npy'])
     parser.add_argument('--img-suffix', type=str, default='.png')
 
@@ -373,7 +527,7 @@ def parse_args():
     parser.add_argument('--eval-only', action='store_true')
     # parser.add_argument('--power', type=float, default=1.0)
     parser.add_argument('--pre-act', type=str,
-                        choices=['pow', 'tanh', 'tanh2', 'piece', 'softmax', 'he', 'trough', 'no'],
+                        choices=['pow', 'tanh', 'tanh2', 'piece', 'softmax', 'he', 'trough', 'trough2', 'no'],
                         default='pow')
     parser.add_argument('--pre-power', type=float, default=1.0)
     parser.add_argument('--pre-mid', type=float, default=0.5)
