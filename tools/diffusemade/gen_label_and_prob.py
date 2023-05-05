@@ -536,7 +536,7 @@ def parse_args():
     parser.add_argument('--pre-high', type=float, default=0.75)
     parser.add_argument('--pre-temp', type=float, default=1.0)
     parser.add_argument('--pre-win', type=float, default=0.2)
-    parser.add_argument('--pre-th', type=float, default=5000)
+    parser.add_argument('--pre-th', type=int, default=5000)
     parser.add_argument('--gen-prob', action='store_true')
     # parser.add_argument('--test', action='store_true')
     parser.add_argument('--show', action='store_true')
