@@ -36,6 +36,12 @@ def main():
 
     img_idx = 0
     out_data_info = []
+
+    # check first
+    for dataset_name in dataset_list:
+        dataset_dir = osp.join(args.root, dataset_name)
+        assert osp.isdir(dataset_dir), f"No such dir: {dataset_dir}"
+
     for dataset_name in dataset_list:
         dataset_dir = osp.join(args.root, dataset_name)
         img_dir = osp.join(dataset_dir, "img_dir/train")
