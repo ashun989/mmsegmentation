@@ -20,7 +20,7 @@ def main():
         'fullData_raw_organized_fullDescription_eta0.1_20k',
         'fullData_chatGPT_vary_10k',
         'fullData_chatGPT_new_massive_20k_005_075',
-        'fullData_chatGPT_massive-v3_20k_005_075',
+        'fullData_chatGPT_new_massive-v3_20k_005_075',
     ]
 
     output_dir = osp.join(args.root, "finalData")
