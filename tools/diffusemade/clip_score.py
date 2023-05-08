@@ -401,12 +401,12 @@ class ImageFeatureBoxes(ImageFeatureBase):
         else:
             boxes = ann2box(ann, multi_contour_eval=True)
             boxes = combine_boxes(boxes)
-        if not boxes or box_area(boxes[0]) == 0:
+        if not boxes or box_area(boxes[0]) < 16 ** 2:
             return None
         imgs = []
         for b in boxes:
             crop_img = torchvision.transforms.functional.crop(
-                img, b[1], b[0], b[3] - b[1], b[2] - b[0])
+                img, b[1], b[0], b[3] - b[1] + 1, b[2] - b[0] + 1)
             imgs.append(self.preprocess(crop_img))
         image_input = torch.tensor(np.stack(imgs)).cuda()
         with torch.no_grad():
